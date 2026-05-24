@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multica · 数据模型 ER 图</title>
+<link rel="stylesheet" href="../deep-dive/style.css" />
+<style>
+  .er-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--fg-muted); margin: 0 0 12px; }
+  .er-legend code { font-size: 11px; }
+  .er-legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 4px; }
+
+  .figure svg { background: transparent; }
+  .figure svg text { font-family: var(--font-sans); }
+
+  /* 实体卡:只描边不填充,让 .figure 的背景色(亮色白/暗色深)透出来,
+     从而绘制顺序上 rect.ent-cell 不会盖住先画的 rect.h 头部色条 */
+  .figure svg rect.ent-cell { fill: transparent; stroke: #d4d4d8; stroke-width: 1; }
+
+  /* 头部色块(分域用不同颜色),需要在 rect.h 上单独命中 */
+  .figure svg rect.h { stroke: none; }
+  .figure svg .grp-id    rect.h { fill: #6366f1; }
+  .figure svg .grp-issue rect.h { fill: #3b82f6; }
+  .figure svg .grp-agent rect.h { fill: #10b981; }
+  .figure svg .grp-squad rect.h { fill: #14b8a6; }
+  .figure svg .grp-auto  rect.h { fill: #f59e0b; }
+  .figure svg .grp-chat  rect.h { fill: #ec4899; }
+  .figure svg .grp-inbox rect.h { fill: #8b5cf6; }
+  .figure svg .grp-gh    rect.h { fill: #334155; }
+  .figure svg .grp-misc  rect.h { fill: #71717a; }
+
+  /* 文本 */
+  .figure svg .ent-title { font-size: 12px; font-weight: 600; fill: #ffffff; }
+  .figure svg .ent-col   { font-size: 11px; fill: #18181b; }
+  .figure svg .ent-pk    { font-size: 11px; font-weight: 600; fill: #6366f1; }
+  .figure svg .ent-fk    { font-size: 11px; fill: #2563eb; }
+  .figure svg .ent-type  { font-size: 10px; fill: #71717a; }
+
+  /* 关系线 */
+  .figure svg .rel-line { stroke: #71717a; stroke-width: 1.5; fill: none; }
+  .figure svg .rel-card { font-size: 10px; fill: #52525b; }
+
+  /* figcaption 在亮色下别太淡 */
+  .figure figcaption { color: #52525b; }
+
+  @media (prefers-color-scheme: dark) {
+    .figure svg rect.ent-cell { fill: transparent; stroke: #52525b; }
+    .figure svg .ent-col   { fill: #e4e4e7; }
+    .figure svg .ent-pk    { fill: #a5b4fc; }
+    .figure svg .ent-fk    { fill: #93c5fd; }
+    .figure svg .ent-type  { fill: #a1a1aa; }
+    .figure svg .rel-line  { stroke: #a1a1aa; }
+    .figure svg .rel-card  { fill: #d4d4d8; }
+    .figure figcaption     { color: #a1a1aa; }
+    /* 内联 fill="#fff" 的椭圆/圆(跨域全景图用) */
+    .figure svg ellipse[fill="#fff"]  { fill: #1f1f23 !important; }
+    .figure svg text[fill="#666"]    { fill: #d4d4d8 !important; }
+    .figure svg text[fill="#999"]    { fill: #a1a1aa !important; }
+    .figure svg text[fill="#888"]    { fill: #a1a1aa !important; }
+  }
+
+  .ent-table { width: 100%; }
+  .ent-table th { font-weight: 500; }
+  .ent-table th.col-table { width: 220px; }
+  .ent-table th.col-tag { width: 100px; }
+  .ent-table td.col-table { font-family: var(--font-mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb"><a href="../overview.html">← 项目速览</a></div>
+  <div class="title-block">
+    <h1>数据模型 ER 图</h1>
+    <p class="path">server/migrations/*.sql · server/pkg/db/queries/*.sql · server/pkg/db/generated/models.go</p>
+    <p class="lede">
+      Multica 全量数据表(基于 sqlc 生成的 <code>models.go</code> 提取),按业务域分成 9 组各自画 ER 图。
+      所有表都通过 <code>workspace_id</code> 串到工作区(除少数全局表)。<strong>多态字段</strong>(<code>actor_type / author_type / member_type</code> 等)用<code>{user|agent|squad}</code>表达,数据库不强制外键,由应用层校验。
+    </p>
+    <div class="er-legend" style="margin-top: 12px;">
+      <span><span class="swatch" style="background: #6366f1;"></span>身份与工作区</span>
+      <span><span class="swatch" style="background: #3b82f6;"></span>Issue 域</span>
+      <span><span class="swatch" style="background: #10b981;"></span>Agent / Task 域</span>
+      <span><span class="swatch" style="background: #14b8a6;"></span>Squad</span>
+      <span><span class="swatch" style="background: #f59e0b;"></span>Autopilot</span>
+      <span><span class="swatch" style="background: #ec4899;"></span>Chat</span>
+      <span><span class="swatch" style="background: #8b5cf6;"></span>Inbox/Pin/Notif</span>
+      <span><span class="swatch" style="background: #18181b;"></span>GitHub</span>
+    </div>
+    <div class="er-legend">
+      <span><strong>PK</strong> = 主键 · <strong>FK</strong> = 外键(蓝色)</span>
+      <span>线段标号:<code>1</code>=单条 · <code>N</code>=多条</span>
+      <span>多态字段示意:<code>actor_type ∈ {user, agent}</code></span>
+    </div>
+  </div>
+
+  <!-- ========== 全局速查 ========== -->
+  <section>
+    <h2>全表速查(共 39 张表)</h2>
+    <p class="muted">按业务域分组。每张表都对应 sqlc 生成的同名 struct,可直接搜 <code>server/pkg/db/generated/models.go</code> 找到字段全集。</p>
+    <table class="ent-table">
+      <thead><tr><th class="col-table">表名</th><th class="col-tag">所属域</th><th>主要字段 / 备注</th></tr></thead>
+      <tbody>
+        <tr><td class="col-table">users</td><td>身份</td><td>email, name, avatar_url, language, timezone, onboarded_at</td></tr>
+        <tr><td class="col-table">workspaces</td><td>身份</td><td>name, slug, settings, repos, issue_prefix, issue_counter</td></tr>
+        <tr><td class="col-table">members</td><td>身份</td><td>workspace_id × user_id × role(关联表)</td></tr>
+        <tr><td class="col-table">workspace_invitations</td><td>身份</td><td>invitee_email, role, status, expires_at</td></tr>
+        <tr><td class="col-table">personal_access_tokens</td><td>身份</td><td>token_hash, token_prefix, revoked, last_used_at</td></tr>
+        <tr><td class="col-table">daemon_tokens</td><td>身份</td><td>token_hash, daemon_id, expires_at</td></tr>
+        <tr><td class="col-table">verification_codes</td><td>身份</td><td>邮箱验证码,使用一次即作废</td></tr>
+        <tr><td class="col-table">notification_preferences</td><td>身份</td><td>workspace_id × user_id × preferences (JSONB)</td></tr>
+
+        <tr><td class="col-table">issues</td><td>Issue</td><td>number, status, priority, assignee_{type,id}, parent_issue_id, project_id, position</td></tr>
+        <tr><td class="col-table">issue_dependency</td><td>Issue</td><td>depends_on_issue_id, type</td></tr>
+        <tr><td class="col-table">issue_labels</td><td>Issue</td><td>workspace 级标签字典</td></tr>
+        <tr><td class="col-table">issue_to_label</td><td>Issue</td><td>多对多关联表</td></tr>
+        <tr><td class="col-table">issue_subscribers</td><td>Issue</td><td>多态 user_type ∈ {user, agent}</td></tr>
+        <tr><td class="col-table">issue_reactions</td><td>Issue</td><td>多态 actor_type · emoji</td></tr>
+        <tr><td class="col-table">comments</td><td>Issue</td><td>parent_id 支持嵌套;type ∈ {comment, system, ...};resolved_at</td></tr>
+        <tr><td class="col-table">comment_reactions</td><td>Issue</td><td>同 issue_reactions</td></tr>
+        <tr><td class="col-table">attachments</td><td>Issue</td><td>uploader_{type,id};可挂在 issue / comment / chat_message</td></tr>
+        <tr><td class="col-table">activity_logs</td><td>Issue</td><td>actor_{type,id}, action, details (JSONB)</td></tr>
+        <tr><td class="col-table">projects</td><td>Issue</td><td>title, status, priority, lead_{type,id}</td></tr>
+        <tr><td class="col-table">project_resources</td><td>Issue</td><td>resource_type, resource_ref (JSONB)</td></tr>
+
+        <tr><td class="col-table">agents</td><td>Agent</td><td>runtime_mode, runtime_id, owner_id, visibility, max_concurrent_tasks, model, instructions</td></tr>
+        <tr><td class="col-table">agent_runtime</td><td>Agent</td><td>本地 daemon / 云端 runtime 节点;daemon_id, last_seen_at, visibility</td></tr>
+        <tr><td class="col-table">agent_skill</td><td>Agent</td><td>agent × skill 多对多</td></tr>
+        <tr><td class="col-table">agent_task_queue</td><td>Agent</td><td><strong>核心任务表</strong>:status, priority, attempt, max_attempts, parent_task_id, autopilot_run_id, chat_session_id, is_leader_task</td></tr>
+        <tr><td class="col-table">task_messages</td><td>Agent</td><td>每次 agent 工具调用一条;seq, type, tool, input, output</td></tr>
+        <tr><td class="col-table">task_usage</td><td>Agent</td><td>每个 task 的 tokens 计量(输入/输出/缓存读写)</td></tr>
+        <tr><td class="col-table">task_usage_hourly</td><td>Agent</td><td>聚合表(workspace × runtime × agent × project × hour)</td></tr>
+        <tr><td class="col-table">task_usage_hourly_dirty</td><td>Agent</td><td>需要重算的 hourly bucket 标记</td></tr>
+        <tr><td class="col-table">task_usage_hourly_rollup_state</td><td>Agent</td><td>定时聚合任务的水位线 + 上次结果</td></tr>
+        <tr><td class="col-table">daemon_connection</td><td>Agent</td><td>daemon 与 agent 的连接;last_heartbeat_at</td></tr>
+        <tr><td class="col-table">skills</td><td>Agent</td><td>workspace 级技能定义;name, description, content, config</td></tr>
+        <tr><td class="col-table">skill_files</td><td>Agent</td><td>skill 内的多文件(path × content)</td></tr>
+
+        <tr><td class="col-table">squads</td><td>Squad</td><td>name, leader_id, instructions, archived_at</td></tr>
+        <tr><td class="col-table">squad_members</td><td>Squad</td><td>多态:member_type ∈ {agent}(可扩展)+ role</td></tr>
+
+        <tr><td class="col-table">autopilots</td><td>Autopilot</td><td>assignee_{type,id}, status, execution_mode, project_id</td></tr>
+        <tr><td class="col-table">autopilot_triggers</td><td>Autopilot</td><td>kind ∈ {assign, comment, scheduled, webhook, ...}, cron_expression, webhook_token</td></tr>
+        <tr><td class="col-table">autopilot_runs</td><td>Autopilot</td><td>每次触发一条;trigger_id, source, status, issue_id, task_id</td></tr>
+        <tr><td class="col-table">webhook_deliveries</td><td>Autopilot</td><td>外部 webhook 投递记录;dedupe_key, signature_status, replay 能力</td></tr>
+
+        <tr><td class="col-table">chat_sessions</td><td>Chat</td><td>workspace × agent × creator;session_id (CLI 端)、unread_since、runtime_id</td></tr>
+        <tr><td class="col-table">chat_messages</td><td>Chat</td><td>role, content, task_id, elapsed_ms</td></tr>
+
+        <tr><td class="col-table">inbox_items</td><td>通知</td><td>recipient_{type,id}, type, severity, read, archived</td></tr>
+        <tr><td class="col-table">pinned_items</td><td>通知</td><td>多态 item_type ∈ {issue, view, ...} + position</td></tr>
+
+        <tr><td class="col-table">github_installations</td><td>GitHub</td><td>installation_id, account_login, account_type</td></tr>
+        <tr><td class="col-table">github_pull_requests</td><td>GitHub</td><td>repo_owner/repo_name/pr_number, state, merged_at, head_sha</td></tr>
+        <tr><td class="col-table">github_pull_request_check_suites</td><td>GitHub</td><td>每个 PR 的 CI 套件状态</td></tr>
+        <tr><td class="col-table">issue_pull_requests</td><td>GitHub</td><td>issue × pr 多对多关联</td></tr>
+
+        <tr><td class="col-table">feedback</td><td>杂项</td><td>用户反馈</td></tr>
+        <tr><td class="col-table">contact_sales_inquiries</td><td>杂项</td><td>销售线索表</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== ① 身份与工作区 ========== -->
+  <section id="er-identity">
+    <h2>① 身份与工作区</h2>
+    <p>用户、工作区、成员、邀请、令牌的关系。<strong>workspace_id</strong> 是 Multica 几乎所有业务表的"租户键"。</p>
+    <div class="figure">
+      <svg viewBox="0 0 920 500" xmlns="http://www.w3.org/2000/svg">
+        <!-- workspaces -->
+        <g class="grp-id">
+          <rect class="h" x="380" y="40" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="380" y="40" width="200" height="180" rx="4" />
+          <text class="ent-title" x="480" y="56" text-anchor="middle">workspaces</text>
+          <text class="ent-pk ent-col" x="392" y="80">PK id</text>
+          <text class="ent-col" x="392" y="98">name</text>
+          <text class="ent-col" x="392" y="116">slug · UNIQUE</text>
+          <text class="ent-col" x="392" y="134">settings (JSONB)</text>
+          <text class="ent-col" x="392" y="152">repos (JSONB)</text>
+          <text class="ent-col" x="392" y="170">issue_prefix</text>
+          <text class="ent-col" x="392" y="188">issue_counter</text>
+          <text class="ent-col" x="392" y="206">created_at</text>
+        </g>
+
+        <!-- users -->
+        <g class="grp-id">
+          <rect class="h" x="40" y="40" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="200" height="200" rx="4" />
+          <text class="ent-title" x="140" y="56" text-anchor="middle">users</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-col" x="52" y="98">email · UNIQUE</text>
+          <text class="ent-col" x="52" y="116">name</text>
+          <text class="ent-col" x="52" y="134">avatar_url</text>
+          <text class="ent-col" x="52" y="152">language</text>
+          <text class="ent-col" x="52" y="170">timezone</text>
+          <text class="ent-col" x="52" y="188">onboarded_at</text>
+          <text class="ent-col" x="52" y="206">starter_content_state</text>
+          <text class="ent-col" x="52" y="224">profile_description</text>
+        </g>
+
+        <!-- members -->
+        <g class="grp-id">
+          <rect class="h" x="220" y="280" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="220" y="280" width="200" height="120" rx="4" />
+          <text class="ent-title" x="320" y="296" text-anchor="middle">members</text>
+          <text class="ent-pk ent-col" x="232" y="320">PK id</text>
+          <text class="ent-fk ent-col" x="232" y="338">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="232" y="356">FK user_id</text>
+          <text class="ent-col" x="232" y="374">role</text>
+        </g>
+
+        <!-- invitations -->
+        <g class="grp-id">
+          <rect class="h" x="440" y="280" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="440" y="280" width="200" height="160" rx="4" />
+          <text class="ent-title" x="540" y="296" text-anchor="middle">workspace_invitations</text>
+          <text class="ent-pk ent-col" x="452" y="320">PK id</text>
+          <text class="ent-fk ent-col" x="452" y="338">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="452" y="356">FK inviter_id</text>
+          <text class="ent-col" x="452" y="374">invitee_email</text>
+          <text class="ent-col" x="452" y="392">invitee_user_id</text>
+          <text class="ent-col" x="452" y="410">role · status</text>
+          <text class="ent-col" x="452" y="428">expires_at</text>
+        </g>
+
+        <!-- personal_access_tokens -->
+        <g class="grp-id">
+          <rect class="h" x="660" y="40" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="660" y="40" width="200" height="160" rx="4" />
+          <text class="ent-title" x="760" y="56" text-anchor="middle">personal_access_tokens</text>
+          <text class="ent-pk ent-col" x="672" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="672" y="98">FK user_id</text>
+          <text class="ent-col" x="672" y="116">token_hash</text>
+          <text class="ent-col" x="672" y="134">token_prefix</text>
+          <text class="ent-col" x="672" y="152">revoked</text>
+          <text class="ent-col" x="672" y="170">last_used_at</text>
+          <text class="ent-col" x="672" y="188">expires_at</text>
+        </g>
+
+        <!-- daemon_tokens -->
+        <g class="grp-id">
+          <rect class="h" x="660" y="240" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="660" y="240" width="200" height="120" rx="4" />
+          <text class="ent-title" x="760" y="256" text-anchor="middle">daemon_tokens</text>
+          <text class="ent-pk ent-col" x="672" y="280">PK id</text>
+          <text class="ent-fk ent-col" x="672" y="298">FK workspace_id</text>
+          <text class="ent-col" x="672" y="316">token_hash</text>
+          <text class="ent-col" x="672" y="334">daemon_id</text>
+          <text class="ent-col" x="672" y="352">expires_at</text>
+        </g>
+
+        <!-- notification_preferences -->
+        <g class="grp-id">
+          <rect class="h" x="40" y="280" width="160" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="280" width="160" height="120" rx="4" />
+          <text class="ent-title" x="120" y="296" text-anchor="middle">notification_preferences</text>
+          <text class="ent-pk ent-col" x="52" y="320">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="338">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="356">FK user_id</text>
+          <text class="ent-col" x="52" y="374">preferences</text>
+        </g>
+
+        <!-- relations -->
+        <line class="rel-line" x1="240" y1="120" x2="380" y2="120" />
+        <text class="rel-card" x="248" y="115">N..N</text>
+        <text class="rel-card" x="350" y="115">via members</text>
+
+        <line class="rel-line" x1="240" y1="200" x2="240" y2="320" />
+        <line class="rel-line" x1="240" y1="320" x2="220" y2="320" />
+        <text class="rel-card" x="245" y="260">1</text>
+
+        <line class="rel-line" x1="420" y1="320" x2="440" y2="320" />
+        <text class="rel-card" x="425" y="315">N</text>
+
+        <line class="rel-line" x1="480" y1="220" x2="540" y2="280" />
+        <text class="rel-card" x="510" y="250">1..N</text>
+
+        <line class="rel-line" x1="240" y1="100" x2="660" y2="100" />
+        <text class="rel-card" x="500" y="95">1..N (PAT)</text>
+
+        <line class="rel-line" x1="580" y1="120" x2="660" y2="280" />
+        <text class="rel-card" x="610" y="200">1..N (daemon tok)</text>
+
+        <line class="rel-line" x1="120" y1="240" x2="120" y2="280" />
+        <text class="rel-card" x="125" y="265">N</text>
+
+        <line class="rel-line" x1="200" y1="356" x2="220" y2="356" />
+      </svg>
+      <figcaption>身份与工作区 ER 图 · 8 张表 · workspace 是租户中枢</figcaption>
+    </div>
+    <div class="callout">
+      <p class="callout-title">关键约束</p>
+      <p class="callout-body">
+        ① <code>workspaces.slug</code> 全局唯一,<code>handler/reserved_slugs.json</code> 黑名单防止与系统路由冲突;
+        ② <code>members</code> 是<strong>用户和工作区的多对多桥</strong>,业务上唯一定义"谁在哪个工作区";
+        ③ <code>verification_codes</code>(图未画)是登录验证用的全局表,无 workspace_id;
+        ④ 几乎所有其它表的访问控制起点是 <code>middleware/workspace.go</code> 解析 slug → 注入 <code>workspace_id</code>。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== ② Issue 域 ========== -->
+  <section id="er-issue">
+    <h2>② Issue 域(协作核心)</h2>
+    <p>issue 与其评论、标签、订阅、反应、附件、活动、依赖、项目的全部关系。<strong>多态字段</strong>(<code>assignee_type / author_type / actor_type / uploader_type</code>)统一用 <code>{user, agent}</code> 表达。</p>
+    <div class="figure">
+      <svg viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg">
+        <!-- issues -->
+        <g class="grp-issue">
+          <rect class="h" x="450" y="40" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="450" y="40" width="220" height="240" rx="4" />
+          <text class="ent-title" x="560" y="56" text-anchor="middle">issues</text>
+          <text class="ent-pk ent-col" x="462" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="462" y="98">FK workspace_id</text>
+          <text class="ent-col" x="462" y="116">number</text>
+          <text class="ent-col" x="462" y="134">title · description</text>
+          <text class="ent-col" x="462" y="152">status · priority</text>
+          <text class="ent-col" x="462" y="170">assignee_{type,id} *</text>
+          <text class="ent-col" x="462" y="188">creator_{type,id} *</text>
+          <text class="ent-fk ent-col" x="462" y="206">FK parent_issue_id</text>
+          <text class="ent-fk ent-col" x="462" y="224">FK project_id</text>
+          <text class="ent-col" x="462" y="242">acceptance_criteria</text>
+          <text class="ent-col" x="462" y="260">due_date · start_date</text>
+        </g>
+
+        <!-- comments -->
+        <g class="grp-issue">
+          <rect class="h" x="40" y="40" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="200" height="180" rx="4" />
+          <text class="ent-title" x="140" y="56" text-anchor="middle">comments</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="98">FK issue_id</text>
+          <text class="ent-fk ent-col" x="52" y="116">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="134">FK parent_id (self)</text>
+          <text class="ent-col" x="52" y="152">author_{type,id} *</text>
+          <text class="ent-col" x="52" y="170">content · type</text>
+          <text class="ent-col" x="52" y="188">resolved_at · resolved_by_*</text>
+        </g>
+
+        <!-- comment_reactions -->
+        <g class="grp-issue">
+          <rect class="h" x="40" y="240" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="240" width="200" height="120" rx="4" />
+          <text class="ent-title" x="140" y="256" text-anchor="middle">comment_reactions</text>
+          <text class="ent-pk ent-col" x="52" y="280">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="298">FK comment_id</text>
+          <text class="ent-fk ent-col" x="52" y="316">FK workspace_id</text>
+          <text class="ent-col" x="52" y="334">actor_{type,id} *</text>
+          <text class="ent-col" x="52" y="352">emoji</text>
+        </g>
+
+        <!-- attachments -->
+        <g class="grp-issue">
+          <rect class="h" x="40" y="380" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="380" width="200" height="180" rx="4" />
+          <text class="ent-title" x="140" y="396" text-anchor="middle">attachments</text>
+          <text class="ent-pk ent-col" x="52" y="420">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="438">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="456">FK issue_id</text>
+          <text class="ent-fk ent-col" x="52" y="474">FK comment_id</text>
+          <text class="ent-fk ent-col" x="52" y="492">FK chat_session_id</text>
+          <text class="ent-fk ent-col" x="52" y="510">FK chat_message_id</text>
+          <text class="ent-col" x="52" y="528">filename · url · size_bytes</text>
+        </g>
+
+        <!-- activity_logs -->
+        <g class="grp-issue">
+          <rect class="h" x="260" y="380" width="180" height="22" rx="4" />
+          <rect class="ent-cell" x="260" y="380" width="180" height="140" rx="4" />
+          <text class="ent-title" x="350" y="396" text-anchor="middle">activity_logs</text>
+          <text class="ent-pk ent-col" x="272" y="420">PK id</text>
+          <text class="ent-fk ent-col" x="272" y="438">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="272" y="456">FK issue_id</text>
+          <text class="ent-col" x="272" y="474">actor_{type,id} *</text>
+          <text class="ent-col" x="272" y="492">action · details</text>
+        </g>
+
+        <!-- issue_subscribers -->
+        <g class="grp-issue">
+          <rect class="h" x="260" y="40" width="160" height="22" rx="4" />
+          <rect class="ent-cell" x="260" y="40" width="160" height="120" rx="4" />
+          <text class="ent-title" x="340" y="56" text-anchor="middle">issue_subscribers</text>
+          <text class="ent-fk ent-col" x="272" y="80">FK issue_id</text>
+          <text class="ent-col" x="272" y="98">user_{type,id} *</text>
+          <text class="ent-col" x="272" y="116">reason</text>
+          <text class="ent-col" x="272" y="134">created_at</text>
+        </g>
+
+        <!-- issue_reactions -->
+        <g class="grp-issue">
+          <rect class="h" x="260" y="180" width="160" height="22" rx="4" />
+          <rect class="ent-cell" x="260" y="180" width="160" height="120" rx="4" />
+          <text class="ent-title" x="340" y="196" text-anchor="middle">issue_reactions</text>
+          <text class="ent-pk ent-col" x="272" y="220">PK id</text>
+          <text class="ent-fk ent-col" x="272" y="238">FK issue_id</text>
+          <text class="ent-col" x="272" y="256">actor_{type,id} *</text>
+          <text class="ent-col" x="272" y="274">emoji</text>
+        </g>
+
+        <!-- issue_dependency -->
+        <g class="grp-issue">
+          <rect class="h" x="700" y="40" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="700" y="40" width="200" height="100" rx="4" />
+          <text class="ent-title" x="800" y="56" text-anchor="middle">issue_dependency</text>
+          <text class="ent-pk ent-col" x="712" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="712" y="98">FK issue_id</text>
+          <text class="ent-fk ent-col" x="712" y="116">FK depends_on_issue_id</text>
+        </g>
+
+        <!-- issue_to_label + issue_labels -->
+        <g class="grp-issue">
+          <rect class="h" x="700" y="160" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="700" y="160" width="200" height="80" rx="4" />
+          <text class="ent-title" x="800" y="176" text-anchor="middle">issue_to_label</text>
+          <text class="ent-fk ent-col" x="712" y="200">FK issue_id</text>
+          <text class="ent-fk ent-col" x="712" y="218">FK label_id</text>
+        </g>
+        <g class="grp-issue">
+          <rect class="h" x="920" y="160" width="160" height="22" rx="4" />
+          <rect class="ent-cell" x="920" y="160" width="160" height="120" rx="4" />
+          <text class="ent-title" x="1000" y="176" text-anchor="middle">issue_labels</text>
+          <text class="ent-pk ent-col" x="932" y="200">PK id</text>
+          <text class="ent-fk ent-col" x="932" y="218">FK workspace_id</text>
+          <text class="ent-col" x="932" y="236">name · color</text>
+        </g>
+
+        <!-- projects -->
+        <g class="grp-issue">
+          <rect class="h" x="700" y="280" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="700" y="280" width="200" height="160" rx="4" />
+          <text class="ent-title" x="800" y="296" text-anchor="middle">projects</text>
+          <text class="ent-pk ent-col" x="712" y="320">PK id</text>
+          <text class="ent-fk ent-col" x="712" y="338">FK workspace_id</text>
+          <text class="ent-col" x="712" y="356">title · description · icon</text>
+          <text class="ent-col" x="712" y="374">status · priority</text>
+          <text class="ent-col" x="712" y="392">lead_{type,id} *</text>
+        </g>
+
+        <!-- project_resources -->
+        <g class="grp-issue">
+          <rect class="h" x="920" y="320" width="160" height="22" rx="4" />
+          <rect class="ent-cell" x="920" y="320" width="160" height="140" rx="4" />
+          <text class="ent-title" x="1000" y="336" text-anchor="middle">project_resources</text>
+          <text class="ent-pk ent-col" x="932" y="360">PK id</text>
+          <text class="ent-fk ent-col" x="932" y="378">FK project_id</text>
+          <text class="ent-fk ent-col" x="932" y="396">FK workspace_id</text>
+          <text class="ent-col" x="932" y="414">resource_type</text>
+          <text class="ent-col" x="932" y="432">resource_ref (JSONB)</text>
+        </g>
+
+        <!-- relations -->
+        <line class="rel-line" x1="240" y1="100" x2="450" y2="140" />
+        <text class="rel-card" x="320" y="115">N..1</text>
+        <line class="rel-line" x1="240" y1="300" x2="240" y2="220" />
+        <line class="rel-line" x1="240" y1="220" x2="40" y2="220" />
+        <text class="rel-card" x="120" y="215">N..1</text>
+        <line class="rel-line" x1="240" y1="450" x2="450" y2="170" />
+        <text class="rel-card" x="320" y="300">N..1 (issue)</text>
+        <line class="rel-line" x1="350" y1="380" x2="450" y2="160" />
+        <text class="rel-card" x="380" y="300">N..1</text>
+
+        <line class="rel-line" x1="420" y1="100" x2="450" y2="100" />
+        <text class="rel-card" x="425" y="95">N</text>
+        <line class="rel-line" x1="420" y1="240" x2="450" y2="180" />
+        <text class="rel-card" x="425" y="220">N</text>
+
+        <line class="rel-line" x1="670" y1="100" x2="700" y2="80" />
+        <text class="rel-card" x="675" y="95">N</text>
+        <line class="rel-line" x1="670" y1="120" x2="700" y2="200" />
+        <text class="rel-card" x="675" y="150">N</text>
+        <line class="rel-line" x1="900" y1="200" x2="920" y2="200" />
+        <text class="rel-card" x="905" y="195">N..1</text>
+
+        <line class="rel-line" x1="670" y1="220" x2="700" y2="320" />
+        <text class="rel-card" x="675" y="280">N..1</text>
+        <line class="rel-line" x1="900" y1="380" x2="920" y2="380" />
+        <text class="rel-card" x="905" y="375">1..N</text>
+
+        <text class="rel-card" x="40" y="700">* 多态字段:type ∈ {user, agent}(无外键约束,应用层校验)</text>
+      </svg>
+      <figcaption>Issue 域 ER 图 · 12 张表 · 多态字段标注 *</figcaption>
+    </div>
+    <div class="callout warn">
+      <p class="callout-title">⚠ 设计注意</p>
+      <p class="callout-body">
+        ① <code>issues.status</code> 是<strong>固定枚举</strong>(backlog/triage/todo/in_progress/done/cancelled),无可配置流程引擎,这是与飞书 MeeGo 的核心差异点 —— 详见 <a href="../research/meego-vs-multica.html">迁移调研文档</a>;
+        ② <code>comments.parent_id</code> 自引用支持嵌套评论 + 解决线程;
+        ③ <code>attachments</code> 同时挂在 issue / comment / chat_session / chat_message,通过非空字段判断归属;
+        ④ <code>activity_logs.details</code> 是 JSONB,结构按 <code>action</code> 分支变化,用 <code>format-activity</code> 在前端格式化。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== ③ Agent / Task 域 ========== -->
+  <section id="er-agent">
+    <h2>③ Agent / Task 域(Multica 的"心脏")</h2>
+    <p>这是把 Multica 区别于普通项目管理软件的关键数据模型。<code>agent_task_queue</code> 承载 agent 任务全生命周期,<code>task_messages</code> 是 agent 工具调用流水,<code>task_usage*</code> 三张表组成 token 计量管道。</p>
+    <div class="figure">
+      <svg viewBox="0 0 1100 760" xmlns="http://www.w3.org/2000/svg">
+        <!-- agents -->
+        <g class="grp-agent">
+          <rect class="h" x="40" y="40" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="220" height="240" rx="4" />
+          <text class="ent-title" x="150" y="56" text-anchor="middle">agents</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="98">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="116">FK runtime_id</text>
+          <text class="ent-fk ent-col" x="52" y="134">FK owner_id (user)</text>
+          <text class="ent-col" x="52" y="152">name · description · avatar_url</text>
+          <text class="ent-col" x="52" y="170">runtime_mode · runtime_config</text>
+          <text class="ent-col" x="52" y="188">visibility · status</text>
+          <text class="ent-col" x="52" y="206">max_concurrent_tasks</text>
+          <text class="ent-col" x="52" y="224">model · thinking_level</text>
+          <text class="ent-col" x="52" y="242">instructions</text>
+          <text class="ent-col" x="52" y="260">custom_env · custom_args · mcp_config</text>
+        </g>
+
+        <!-- agent_runtime -->
+        <g class="grp-agent">
+          <rect class="h" x="40" y="320" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="320" width="220" height="180" rx="4" />
+          <text class="ent-title" x="150" y="336" text-anchor="middle">agent_runtime</text>
+          <text class="ent-pk ent-col" x="52" y="360">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="378">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="396">FK owner_id</text>
+          <text class="ent-col" x="52" y="414">daemon_id · legacy_daemon_id</text>
+          <text class="ent-col" x="52" y="432">runtime_mode · provider</text>
+          <text class="ent-col" x="52" y="450">status · visibility</text>
+          <text class="ent-col" x="52" y="468">device_info · metadata</text>
+          <text class="ent-col" x="52" y="486">last_seen_at</text>
+        </g>
+
+        <!-- agent_task_queue -->
+        <g class="grp-agent">
+          <rect class="h" x="380" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="380" y="40" width="240" height="320" rx="4" />
+          <text class="ent-title" x="500" y="56" text-anchor="middle">agent_task_queue ⭐</text>
+          <text class="ent-pk ent-col" x="392" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="392" y="98">FK agent_id</text>
+          <text class="ent-fk ent-col" x="392" y="116">FK issue_id</text>
+          <text class="ent-fk ent-col" x="392" y="134">FK runtime_id</text>
+          <text class="ent-fk ent-col" x="392" y="152">FK trigger_comment_id</text>
+          <text class="ent-fk ent-col" x="392" y="170">FK chat_session_id</text>
+          <text class="ent-fk ent-col" x="392" y="188">FK autopilot_run_id</text>
+          <text class="ent-fk ent-col" x="392" y="206">FK parent_task_id</text>
+          <text class="ent-col" x="392" y="224">status (queued/running/done/failed/cancelled)</text>
+          <text class="ent-col" x="392" y="242">priority · attempt · max_attempts</text>
+          <text class="ent-col" x="392" y="260">dispatched_at · started_at · completed_at</text>
+          <text class="ent-col" x="392" y="278">session_id · work_dir</text>
+          <text class="ent-col" x="392" y="296">context · result · error · failure_reason</text>
+          <text class="ent-col" x="392" y="314">trigger_summary</text>
+          <text class="ent-col" x="392" y="332">force_fresh_session · is_leader_task</text>
+        </g>
+
+        <!-- task_messages -->
+        <g class="grp-agent">
+          <rect class="h" x="380" y="400" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="380" y="400" width="220" height="120" rx="4" />
+          <text class="ent-title" x="490" y="416" text-anchor="middle">task_messages</text>
+          <text class="ent-pk ent-col" x="392" y="440">PK id</text>
+          <text class="ent-fk ent-col" x="392" y="458">FK task_id</text>
+          <text class="ent-col" x="392" y="476">seq · type · tool</text>
+          <text class="ent-col" x="392" y="494">content · input · output</text>
+        </g>
+
+        <!-- task_usage -->
+        <g class="grp-agent">
+          <rect class="h" x="660" y="40" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="660" y="40" width="220" height="160" rx="4" />
+          <text class="ent-title" x="770" y="56" text-anchor="middle">task_usage</text>
+          <text class="ent-pk ent-col" x="672" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="672" y="98">FK task_id</text>
+          <text class="ent-col" x="672" y="116">provider · model</text>
+          <text class="ent-col" x="672" y="134">input_tokens · output_tokens</text>
+          <text class="ent-col" x="672" y="152">cache_read_tokens</text>
+          <text class="ent-col" x="672" y="170">cache_write_tokens</text>
+        </g>
+
+        <!-- task_usage_hourly -->
+        <g class="grp-agent">
+          <rect class="h" x="660" y="220" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="660" y="220" width="220" height="160" rx="4" />
+          <text class="ent-title" x="770" y="236" text-anchor="middle">task_usage_hourly (rollup)</text>
+          <text class="ent-pk ent-col" x="672" y="260">PK (bucket_hour, ws, runtime, agent, project, provider, model)</text>
+          <text class="ent-col" x="672" y="298">input_tokens · output_tokens</text>
+          <text class="ent-col" x="672" y="316">cache_read · cache_write</text>
+          <text class="ent-col" x="672" y="334">task_count · event_count</text>
+        </g>
+
+        <!-- task_usage_hourly_dirty -->
+        <g class="grp-agent">
+          <rect class="h" x="900" y="220" width="180" height="22" rx="4" />
+          <rect class="ent-cell" x="900" y="220" width="180" height="120" rx="4" />
+          <text class="ent-title" x="990" y="236" text-anchor="middle">..._hourly_dirty</text>
+          <text class="ent-col" x="912" y="260">需要重算的 bucket</text>
+          <text class="ent-col" x="912" y="278">enqueued_at</text>
+        </g>
+
+        <!-- daemon_connection -->
+        <g class="grp-agent">
+          <rect class="h" x="660" y="400" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="660" y="400" width="220" height="140" rx="4" />
+          <text class="ent-title" x="770" y="416" text-anchor="middle">daemon_connection</text>
+          <text class="ent-pk ent-col" x="672" y="440">PK id</text>
+          <text class="ent-fk ent-col" x="672" y="458">FK agent_id</text>
+          <text class="ent-col" x="672" y="476">daemon_id · status</text>
+          <text class="ent-col" x="672" y="494">last_heartbeat_at</text>
+          <text class="ent-col" x="672" y="512">runtime_info (JSONB)</text>
+        </g>
+
+        <!-- skills -->
+        <g class="grp-agent">
+          <rect class="h" x="280" y="560" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="280" y="560" width="200" height="140" rx="4" />
+          <text class="ent-title" x="380" y="576" text-anchor="middle">skills</text>
+          <text class="ent-pk ent-col" x="292" y="600">PK id</text>
+          <text class="ent-fk ent-col" x="292" y="618">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="292" y="636">FK created_by (user)</text>
+          <text class="ent-col" x="292" y="654">name · description</text>
+          <text class="ent-col" x="292" y="672">content · config</text>
+        </g>
+
+        <!-- skill_files -->
+        <g class="grp-agent">
+          <rect class="h" x="500" y="560" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="500" y="560" width="200" height="120" rx="4" />
+          <text class="ent-title" x="600" y="576" text-anchor="middle">skill_files</text>
+          <text class="ent-pk ent-col" x="512" y="600">PK id</text>
+          <text class="ent-fk ent-col" x="512" y="618">FK skill_id</text>
+          <text class="ent-col" x="512" y="636">path · content</text>
+        </g>
+
+        <!-- agent_skill -->
+        <g class="grp-agent">
+          <rect class="h" x="60" y="560" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="60" y="560" width="200" height="100" rx="4" />
+          <text class="ent-title" x="160" y="576" text-anchor="middle">agent_skill</text>
+          <text class="ent-fk ent-col" x="72" y="600">FK agent_id</text>
+          <text class="ent-fk ent-col" x="72" y="618">FK skill_id</text>
+          <text class="ent-col" x="72" y="636">created_at</text>
+        </g>
+
+        <!-- relations -->
+        <line class="rel-line" x1="260" y1="160" x2="380" y2="160" />
+        <text class="rel-card" x="280" y="155">1..N (agent → task)</text>
+        <line class="rel-line" x1="260" y1="380" x2="380" y2="160" />
+        <text class="rel-card" x="280" y="270">N..1 (runtime → task)</text>
+        <line class="rel-line" x1="260" y1="120" x2="40" y2="380" />
+        <text class="rel-card" x="40" y="320">N..1 (agent → runtime)</text>
+
+        <line class="rel-line" x1="500" y1="360" x2="500" y2="400" />
+        <text class="rel-card" x="510" y="385">1..N (task → msg)</text>
+
+        <line class="rel-line" x1="620" y1="100" x2="660" y2="100" />
+        <text class="rel-card" x="625" y="95">1..1</text>
+        <line class="rel-line" x1="620" y1="200" x2="660" y2="280" />
+        <text class="rel-card" x="625" y="240">∑ via rollup job</text>
+        <line class="rel-line" x1="880" y1="280" x2="900" y2="280" />
+
+        <line class="rel-line" x1="160" y1="280" x2="160" y2="560" />
+        <text class="rel-card" x="165" y="420">N..N</text>
+        <line class="rel-line" x1="260" y1="600" x2="280" y2="600" />
+        <line class="rel-line" x1="480" y1="620" x2="500" y2="620" />
+        <text class="rel-card" x="485" y="615">1..N</text>
+
+        <line class="rel-line" x1="260" y1="220" x2="660" y2="450" />
+        <text class="rel-card" x="450" y="430">1..N (agent → daemon_conn)</text>
+      </svg>
+      <figcaption>Agent / Task 域 ER 图 · 11 张表 · ⭐ <code>agent_task_queue</code> 是核心 (详见 <a href="../deep-dive/06-task-service.html">06-task-service</a>)</figcaption>
+    </div>
+    <div class="callout">
+      <p class="callout-title">关键设计</p>
+      <p class="callout-body">
+        ① <code>agent_task_queue</code> 同时被 <strong>3 个来源</strong>触发:issue 指派(<code>trigger_comment_id</code>)、chat 对话(<code>chat_session_id</code>)、autopilot 自动开工(<code>autopilot_run_id</code>),三者互斥(应用层保证);<br />
+        ② <code>parent_task_id</code> + <code>is_leader_task</code> 支撑 squad 内"leader 任务路由到 member 任务"的二级结构;<br />
+        ③ Token 计量是<strong>三段管道</strong>:实时写 <code>task_usage</code> → dirty 表打标 → 定时任务把 dirty bucket 重算到 <code>task_usage_hourly</code>(以减小高频任务的写放大);<br />
+        ④ <code>skills</code> 与 <code>agent_skill</code> 多对多;<code>skill_files</code> 让一个 skill 可以承载多文件(如多步骤 prompt + 模板)。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== ④ Squad ========== -->
+  <section id="er-squad">
+    <h2>④ Squad(Agent 团队)</h2>
+    <p>把多个 agent 组成"团队",由 leader 负责把任务路由到合适的 member。<code>squad_members.member_type</code> 多态,目前只用 <code>agent</code>,但保留扩展空间。</p>
+    <div class="figure">
+      <svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg">
+        <g class="grp-squad">
+          <rect class="h" x="40" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="240" height="200" rx="4" />
+          <text class="ent-title" x="160" y="56" text-anchor="middle">squads</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="98">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="116">FK leader_id (agents)</text>
+          <text class="ent-fk ent-col" x="52" y="134">FK creator_id (users)</text>
+          <text class="ent-fk ent-col" x="52" y="152">FK archived_by (users)</text>
+          <text class="ent-col" x="52" y="170">name · description</text>
+          <text class="ent-col" x="52" y="188">avatar_url · instructions</text>
+          <text class="ent-col" x="52" y="206">archived_at</text>
+        </g>
+        <g class="grp-squad">
+          <rect class="h" x="380" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="380" y="40" width="240" height="160" rx="4" />
+          <text class="ent-title" x="500" y="56" text-anchor="middle">squad_members</text>
+          <text class="ent-pk ent-col" x="392" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="392" y="98">FK squad_id</text>
+          <text class="ent-col" x="392" y="116">member_type ∈ {agent}</text>
+          <text class="ent-col" x="392" y="134">member_id</text>
+          <text class="ent-col" x="392" y="152">role</text>
+          <text class="ent-col" x="392" y="170">created_at</text>
+        </g>
+        <line class="rel-line" x1="280" y1="100" x2="380" y2="100" />
+        <text class="rel-card" x="300" y="95">1..N (squad → members)</text>
+        <line class="rel-line" x1="160" y1="240" x2="160" y2="280" />
+        <text class="rel-card" x="40" y="280">leader/creator/archiver 都是<strong>外部表的 FK</strong>:</text>
+        <text class="rel-card" x="40" y="295">  leader_id → agents · creator_id/archived_by → users</text>
+      </svg>
+      <figcaption>Squad ER 图 · 2 张表 + 跨域 FK</figcaption>
+    </div>
+  </section>
+
+  <!-- ========== ⑤ Autopilot ========== -->
+  <section id="er-autopilot">
+    <h2>⑤ Autopilot(规则触发自动开工)</h2>
+    <p>四张表的"触发器 → 运行 → 投递"管道:autopilots(规则) · autopilot_triggers(订阅源) · autopilot_runs(每次触发) · webhook_deliveries(外部 webhook 落库)。</p>
+    <div class="figure">
+      <svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg">
+        <g class="grp-auto">
+          <rect class="h" x="40" y="40" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="220" height="220" rx="4" />
+          <text class="ent-title" x="150" y="56" text-anchor="middle">autopilots</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="98">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="116">FK project_id</text>
+          <text class="ent-col" x="52" y="134">title · description</text>
+          <text class="ent-col" x="52" y="152">assignee_{type,id} *</text>
+          <text class="ent-col" x="52" y="170">status · execution_mode</text>
+          <text class="ent-col" x="52" y="188">issue_title_template</text>
+          <text class="ent-col" x="52" y="206">created_by_{type,id} *</text>
+          <text class="ent-col" x="52" y="224">last_run_at</text>
+        </g>
+        <g class="grp-auto">
+          <rect class="h" x="320" y="40" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="320" y="40" width="220" height="220" rx="4" />
+          <text class="ent-title" x="430" y="56" text-anchor="middle">autopilot_triggers</text>
+          <text class="ent-pk ent-col" x="332" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="332" y="98">FK autopilot_id</text>
+          <text class="ent-col" x="332" y="116">kind ∈ {assign, comment, mention,</text>
+          <text class="ent-col" x="332" y="134">  scheduled, webhook, ...}</text>
+          <text class="ent-col" x="332" y="152">enabled · provider</text>
+          <text class="ent-col" x="332" y="170">cron_expression · timezone</text>
+          <text class="ent-col" x="332" y="188">next_run_at · last_fired_at</text>
+          <text class="ent-col" x="332" y="206">webhook_token · signing_secret</text>
+          <text class="ent-col" x="332" y="224">label</text>
+        </g>
+        <g class="grp-auto">
+          <rect class="h" x="600" y="40" width="220" height="22" rx="4" />
+          <rect class="ent-cell" x="600" y="40" width="220" height="200" rx="4" />
+          <text class="ent-title" x="710" y="56" text-anchor="middle">autopilot_runs</text>
+          <text class="ent-pk ent-col" x="612" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="612" y="98">FK autopilot_id</text>
+          <text class="ent-fk ent-col" x="612" y="116">FK trigger_id</text>
+          <text class="ent-fk ent-col" x="612" y="134">FK issue_id</text>
+          <text class="ent-fk ent-col" x="612" y="152">FK task_id</text>
+          <text class="ent-fk ent-col" x="612" y="170">FK squad_id</text>
+          <text class="ent-col" x="612" y="188">source · status</text>
+          <text class="ent-col" x="612" y="206">trigger_payload · result · failure_reason</text>
+        </g>
+        <g class="grp-auto">
+          <rect class="h" x="880" y="40" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="880" y="40" width="200" height="280" rx="4" />
+          <text class="ent-title" x="980" y="56" text-anchor="middle">webhook_deliveries</text>
+          <text class="ent-pk ent-col" x="892" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="892" y="98">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="892" y="116">FK autopilot_id</text>
+          <text class="ent-fk ent-col" x="892" y="134">FK trigger_id</text>
+          <text class="ent-fk ent-col" x="892" y="152">FK autopilot_run_id</text>
+          <text class="ent-fk ent-col" x="892" y="170">FK replayed_from_delivery_id</text>
+          <text class="ent-col" x="892" y="188">provider · event</text>
+          <text class="ent-col" x="892" y="206">dedupe_key · dedupe_source</text>
+          <text class="ent-col" x="892" y="224">signature_status · status</text>
+          <text class="ent-col" x="892" y="242">attempt_count</text>
+          <text class="ent-col" x="892" y="260">selected_headers · raw_body</text>
+          <text class="ent-col" x="892" y="278">response_status · response_body</text>
+          <text class="ent-col" x="892" y="296">error · last_attempt_at</text>
+        </g>
+
+        <line class="rel-line" x1="260" y1="100" x2="320" y2="100" />
+        <text class="rel-card" x="265" y="95">1..N</text>
+        <line class="rel-line" x1="540" y1="100" x2="600" y2="100" />
+        <text class="rel-card" x="545" y="95">1..N</text>
+        <line class="rel-line" x1="820" y1="160" x2="880" y2="160" />
+        <text class="rel-card" x="825" y="155">1..N</text>
+        <line class="rel-line" x1="540" y1="160" x2="600" y2="160" />
+        <text class="rel-card" x="545" y="155">trigger</text>
+      </svg>
+      <figcaption>Autopilot ER 图 · 4 张表 · 触发管道</figcaption>
+    </div>
+    <div class="callout ok">
+      <p class="callout-title">设计要点</p>
+      <p class="callout-body">
+        <code>autopilot_runs.task_id</code> 接回 Agent / Task 域,把"规则触发"和"agent 干活"无缝衔接;
+        <code>webhook_deliveries.dedupe_key</code> + <code>replayed_from_delivery_id</code> 支撑去重和重放;
+        <code>signing_secret</code> 与 <code>signature_status</code> 用于校验 GitHub / Gitlab 等外部 webhook 真实性。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========== ⑥ Chat ========== -->
+  <section id="er-chat">
+    <h2>⑥ Chat(与 agent 的对话)</h2>
+    <p>Chat 是除 issue 之外触发 agent 任务的<strong>第二条入口</strong>。一个 chat session 内,每条用户消息可派生一个 agent task,task 完成产出助手消息。</p>
+    <div class="figure">
+      <svg viewBox="0 0 800 360" xmlns="http://www.w3.org/2000/svg">
+        <g class="grp-chat">
+          <rect class="h" x="40" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="240" height="220" rx="4" />
+          <text class="ent-title" x="160" y="56" text-anchor="middle">chat_sessions</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="98">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="52" y="116">FK agent_id</text>
+          <text class="ent-fk ent-col" x="52" y="134">FK creator_id (user)</text>
+          <text class="ent-fk ent-col" x="52" y="152">FK runtime_id</text>
+          <text class="ent-col" x="52" y="170">title</text>
+          <text class="ent-col" x="52" y="188">session_id (CLI 端会话锚点)</text>
+          <text class="ent-col" x="52" y="206">work_dir · status</text>
+          <text class="ent-col" x="52" y="224">unread_since</text>
+          <text class="ent-col" x="52" y="242">created_at · updated_at</text>
+        </g>
+        <g class="grp-chat">
+          <rect class="h" x="380" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="380" y="40" width="240" height="180" rx="4" />
+          <text class="ent-title" x="500" y="56" text-anchor="middle">chat_messages</text>
+          <text class="ent-pk ent-col" x="392" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="392" y="98">FK chat_session_id</text>
+          <text class="ent-fk ent-col" x="392" y="116">FK task_id</text>
+          <text class="ent-col" x="392" y="134">role ∈ {user, assistant, system}</text>
+          <text class="ent-col" x="392" y="152">content</text>
+          <text class="ent-col" x="392" y="170">elapsed_ms</text>
+          <text class="ent-col" x="392" y="188">failure_reason</text>
+          <text class="ent-col" x="392" y="206">created_at</text>
+        </g>
+        <line class="rel-line" x1="280" y1="100" x2="380" y2="100" />
+        <text class="rel-card" x="290" y="95">1..N (session → message)</text>
+
+        <g class="grp-agent">
+          <rect class="h" x="380" y="260" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="380" y="260" width="240" height="60" rx="4" />
+          <text class="ent-title" x="500" y="276" text-anchor="middle">agent_task_queue (跨域)</text>
+          <text class="ent-col" x="392" y="300">FK chat_session_id (回溯)</text>
+        </g>
+        <line class="rel-line" x1="500" y1="220" x2="500" y2="260" />
+        <text class="rel-card" x="510" y="245">每条 user msg 派生一个 task</text>
+      </svg>
+      <figcaption>Chat ER 图 · 2 张表 + 跨域 FK</figcaption>
+    </div>
+  </section>
+
+  <!-- ========== ⑦ Inbox / Pin / Notification ========== -->
+  <section id="er-inbox">
+    <h2>⑦ Inbox / Pin / Notification</h2>
+    <p>用户旅程的"通知 + 收藏"三表组。<code>inbox_items</code> 是核心通知聚合;<code>pinned_items</code> 多态收藏 issue/view 等;<code>notification_preferences</code> 已在身份域出现过。</p>
+    <div class="figure">
+      <svg viewBox="0 0 800 380" xmlns="http://www.w3.org/2000/svg">
+        <g class="grp-inbox">
+          <rect class="h" x="40" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="240" height="280" rx="4" />
+          <text class="ent-title" x="160" y="56" text-anchor="middle">inbox_items</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="98">FK workspace_id</text>
+          <text class="ent-col" x="52" y="116">recipient_{type,id} *</text>
+          <text class="ent-col" x="52" y="134">type (assigned · mentioned · ...)</text>
+          <text class="ent-col" x="52" y="152">severity</text>
+          <text class="ent-fk ent-col" x="52" y="170">FK issue_id</text>
+          <text class="ent-col" x="52" y="188">title · body</text>
+          <text class="ent-col" x="52" y="206">read · archived</text>
+          <text class="ent-col" x="52" y="224">actor_{type,id} *</text>
+          <text class="ent-col" x="52" y="242">details (JSONB)</text>
+          <text class="ent-col" x="52" y="260">created_at</text>
+        </g>
+        <g class="grp-inbox">
+          <rect class="h" x="380" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="380" y="40" width="240" height="180" rx="4" />
+          <text class="ent-title" x="500" y="56" text-anchor="middle">pinned_items</text>
+          <text class="ent-pk ent-col" x="392" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="392" y="98">FK workspace_id</text>
+          <text class="ent-fk ent-col" x="392" y="116">FK user_id</text>
+          <text class="ent-col" x="392" y="134">item_type ∈ {issue, view, ...}</text>
+          <text class="ent-col" x="392" y="152">item_id (多态)</text>
+          <text class="ent-col" x="392" y="170">position</text>
+          <text class="ent-col" x="392" y="188">created_at</text>
+        </g>
+      </svg>
+      <figcaption>Inbox / Pin ER 图 · 2 张表(+ notification_preferences 在身份域)</figcaption>
+    </div>
+  </section>
+
+  <!-- ========== ⑧ GitHub ========== -->
+  <section id="er-github">
+    <h2>⑧ GitHub 集成</h2>
+    <p>记录 GitHub App 安装、PR 元数据与 CI 状态,并通过 <code>issue_pull_requests</code> 把 PR 反向关联回 multica 的 issue。</p>
+    <div class="figure">
+      <svg viewBox="0 0 1100 480" xmlns="http://www.w3.org/2000/svg">
+        <g class="grp-gh">
+          <rect class="h" x="40" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="40" y="40" width="240" height="180" rx="4" />
+          <text class="ent-title" x="160" y="56" text-anchor="middle">github_installations</text>
+          <text class="ent-pk ent-col" x="52" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="52" y="98">FK workspace_id</text>
+          <text class="ent-col" x="52" y="116">installation_id (GH)</text>
+          <text class="ent-col" x="52" y="134">account_login · account_type</text>
+          <text class="ent-col" x="52" y="152">account_avatar_url</text>
+          <text class="ent-fk ent-col" x="52" y="170">FK connected_by_id</text>
+          <text class="ent-col" x="52" y="188">created_at · updated_at</text>
+        </g>
+        <g class="grp-gh">
+          <rect class="h" x="320" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="320" y="40" width="240" height="280" rx="4" />
+          <text class="ent-title" x="440" y="56" text-anchor="middle">github_pull_requests</text>
+          <text class="ent-pk ent-col" x="332" y="80">PK id</text>
+          <text class="ent-fk ent-col" x="332" y="98">FK workspace_id</text>
+          <text class="ent-col" x="332" y="116">installation_id</text>
+          <text class="ent-col" x="332" y="134">repo_owner · repo_name</text>
+          <text class="ent-col" x="332" y="152">pr_number · title</text>
+          <text class="ent-col" x="332" y="170">state · branch</text>
+          <text class="ent-col" x="332" y="188">author_login · author_avatar_url</text>
+          <text class="ent-col" x="332" y="206">html_url</text>
+          <text class="ent-col" x="332" y="224">head_sha · mergeable_state</text>
+          <text class="ent-col" x="332" y="242">additions · deletions</text>
+          <text class="ent-col" x="332" y="260">changed_files</text>
+          <text class="ent-col" x="332" y="278">merged_at · closed_at</text>
+          <text class="ent-col" x="332" y="296">pr_created_at · pr_updated_at</text>
+        </g>
+        <g class="grp-gh">
+          <rect class="h" x="600" y="40" width="240" height="22" rx="4" />
+          <rect class="ent-cell" x="600" y="40" width="240" height="160" rx="4" />
+          <text class="ent-title" x="720" y="56" text-anchor="middle">..._check_suites</text>
+          <text class="ent-fk ent-col" x="612" y="80">FK pr_id</text>
+          <text class="ent-col" x="612" y="98">suite_id (GH) · app_id</text>
+          <text class="ent-col" x="612" y="116">head_sha</text>
+          <text class="ent-col" x="612" y="134">conclusion · status</text>
+          <text class="ent-col" x="612" y="152">updated_at</text>
+        </g>
+        <g class="grp-gh">
+          <rect class="h" x="880" y="40" width="200" height="22" rx="4" />
+          <rect class="ent-cell" x="880" y="40" width="200" height="160" rx="4" />
+          <text class="ent-title" x="980" y="56" text-anchor="middle">issue_pull_requests</text>
+          <text class="ent-fk ent-col" x="892" y="80">FK issue_id</text>
+          <text class="ent-fk ent-col" x="892" y="98">FK pull_request_id</text>
+          <text class="ent-col" x="892" y="116">linked_by_{type,id} *</text>
+          <text class="ent-col" x="892" y="134">linked_at</text>
+        </g>
+
+        <line class="rel-line" x1="280" y1="100" x2="320" y2="100" />
+        <text class="rel-card" x="285" y="95">1..N</text>
+        <line class="rel-line" x1="560" y1="120" x2="600" y2="120" />
+        <text class="rel-card" x="565" y="115">1..N</text>
+        <line class="rel-line" x1="560" y1="180" x2="880" y2="120" />
+        <text class="rel-card" x="700" y="155">N..N (issue ↔ pr)</text>
+      </svg>
+      <figcaption>GitHub 集成 ER 图 · 4 张表 · 串到 issues</figcaption>
+    </div>
+  </section>
+
+  <!-- ========== ⑨ 杂项 ========== -->
+  <section id="er-misc">
+    <h2>⑨ 杂项(反馈、销售线索)</h2>
+    <table class="ent-table">
+      <thead><tr><th class="col-table">表</th><th>主键</th><th>关联</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td class="col-table">feedback</td><td>id</td><td>user_id, workspace_id(都可选)</td><td>用户提交的反馈;message + metadata(浏览器信息等)</td></tr>
+        <tr><td class="col-table">contact_sales_inquiries</td><td>id</td><td>无 FK</td><td>销售线索表(landing 页提交);submitter_ip · user_agent</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== 跨域全景图 ========== -->
+  <section id="er-overview">
+    <h2>⑩ 跨域全景:谁是中心节点</h2>
+    <p>把 9 个域的"中心实体"拉到一张图,可以看到 <strong>workspaces</strong> 是租户中枢,<strong>issues</strong> 是协作中枢,<strong>agent_task_queue</strong> 是 agent 业务的中枢,三者合起来覆盖 80% 的查询路径。</p>
+    <div class="figure">
+      <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="er-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#888" />
+          </marker>
+        </defs>
+
+        <ellipse cx="500" cy="250" rx="80" ry="40" fill="#6366f1" stroke="#4f46e5" stroke-width="1.5" />
+        <text x="500" y="246" text-anchor="middle" font-size="14" font-weight="600" fill="#fff">workspaces</text>
+        <text x="500" y="262" text-anchor="middle" font-size="11" fill="#e0e7ff">(租户中枢)</text>
+
+        <ellipse cx="180" cy="120" rx="80" ry="36" fill="#fff" stroke="#3b82f6" stroke-width="1.5" />
+        <text x="180" y="118" text-anchor="middle" font-size="13" font-weight="600">users</text>
+        <text x="180" y="134" text-anchor="middle" font-size="10" fill="#666">via members</text>
+
+        <ellipse cx="200" cy="380" rx="80" ry="36" fill="#fff" stroke="#3b82f6" stroke-width="1.5" />
+        <text x="200" y="378" text-anchor="middle" font-size="13" font-weight="600">issues</text>
+        <text x="200" y="394" text-anchor="middle" font-size="10" fill="#666">+ comments / labels / pr</text>
+
+        <ellipse cx="820" cy="120" rx="80" ry="36" fill="#fff" stroke="#10b981" stroke-width="1.5" />
+        <text x="820" y="118" text-anchor="middle" font-size="13" font-weight="600">agents</text>
+        <text x="820" y="134" text-anchor="middle" font-size="10" fill="#666">+ runtimes / skills</text>
+
+        <ellipse cx="820" cy="380" rx="100" ry="40" fill="#fff" stroke="#10b981" stroke-width="2" />
+        <text x="820" y="378" text-anchor="middle" font-size="13" font-weight="600">agent_task_queue ⭐</text>
+        <text x="820" y="394" text-anchor="middle" font-size="10" fill="#666">+ messages / usage</text>
+
+        <ellipse cx="500" cy="60" rx="80" ry="30" fill="#fff" stroke="#f59e0b" stroke-width="1.5" />
+        <text x="500" y="58" text-anchor="middle" font-size="13" font-weight="600">autopilots</text>
+        <text x="500" y="76" text-anchor="middle" font-size="10" fill="#666">+ triggers / runs</text>
+
+        <ellipse cx="500" cy="440" rx="80" ry="30" fill="#fff" stroke="#ec4899" stroke-width="1.5" />
+        <text x="500" y="438" text-anchor="middle" font-size="13" font-weight="600">chat_sessions</text>
+        <text x="500" y="456" text-anchor="middle" font-size="10" fill="#666">+ messages</text>
+
+        <ellipse cx="180" cy="250" rx="80" ry="30" fill="#fff" stroke="#14b8a6" stroke-width="1.5" />
+        <text x="180" y="248" text-anchor="middle" font-size="13" font-weight="600">squads</text>
+        <text x="180" y="266" text-anchor="middle" font-size="10" fill="#666">+ members</text>
+
+        <ellipse cx="820" cy="250" rx="80" ry="30" fill="#fff" stroke="#8b5cf6" stroke-width="1.5" />
+        <text x="820" y="248" text-anchor="middle" font-size="13" font-weight="600">inbox_items</text>
+        <text x="820" y="266" text-anchor="middle" font-size="10" fill="#666">+ pins / notif prefs</text>
+
+        <line stroke="#888" stroke-width="1.4" x1="260" y1="135" x2="420" y2="230" marker-end="url(#er-arr)" />
+        <line stroke="#888" stroke-width="1.4" x1="280" y1="370" x2="420" y2="270" marker-end="url(#er-arr)" />
+        <line stroke="#888" stroke-width="1.4" x1="740" y1="135" x2="580" y2="230" marker-end="url(#er-arr)" />
+        <line stroke="#888" stroke-width="1.4" x1="740" y1="365" x2="580" y2="270" marker-end="url(#er-arr)" />
+        <line stroke="#888" stroke-width="1.4" x1="500" y1="90" x2="500" y2="210" marker-end="url(#er-arr)" />
+        <line stroke="#888" stroke-width="1.4" x1="500" y1="410" x2="500" y2="290" marker-end="url(#er-arr)" />
+        <line stroke="#888" stroke-width="1.4" x1="260" y1="250" x2="420" y2="250" marker-end="url(#er-arr)" />
+        <line stroke="#888" stroke-width="1.4" x1="740" y1="250" x2="580" y2="250" marker-end="url(#er-arr)" />
+
+        <line stroke="#888" stroke-width="1" stroke-dasharray="4 3" x1="280" y1="380" x2="720" y2="380" marker-end="url(#er-arr)" />
+        <text x="500" y="375" text-anchor="middle" font-size="10" fill="#999">issues ↔ task</text>
+
+        <line stroke="#888" stroke-width="1" stroke-dasharray="4 3" x1="500" y1="90" x2="780" y2="370" marker-end="url(#er-arr)" />
+        <text x="700" y="240" font-size="10" fill="#999">autopilot_run.task_id</text>
+
+        <line stroke="#888" stroke-width="1" stroke-dasharray="4 3" x1="540" y1="450" x2="760" y2="395" marker-end="url(#er-arr)" />
+        <text x="600" y="445" font-size="10" fill="#999">chat_message.task_id</text>
+
+        <text x="500" y="495" text-anchor="middle" font-size="11" fill="#888">实线 = workspace_id 关联 · 虚线 = 跨域业务 FK</text>
+      </svg>
+      <figcaption>9 个域中心实体的连接关系 · workspaces / issues / agent_task_queue 三角承担 80% 查询</figcaption>
+    </div>
+  </section>
+
+  <!-- ========== 设计约定 ========== -->
+  <section id="er-conventions">
+    <h2>⑪ 设计约定速记</h2>
+    <table>
+      <thead><tr><th>约定</th><th>含义</th><th>示例</th></tr></thead>
+      <tbody>
+        <tr><td>UUID 主键</td><td>所有 PK 都是 <code>pgtype.UUID</code>,客户端可生成,便于离线;</td><td>所有表的 <code>id</code></td></tr>
+        <tr><td>workspace_id 租户键</td><td>除身份/全局表外,所有表都带 <code>workspace_id</code>,middleware 强制注入</td><td>issues, agents, autopilots, ...</td></tr>
+        <tr><td>多态字段对(*_type, *_id)</td><td>Go 端用 <code>{user, agent, ...}</code> 字符串;<strong>无外键约束</strong>,由 service 层校验</td><td>assignee_{type,id} · actor_{type,id} · author_{type,id}</td></tr>
+        <tr><td>时间字段</td><td>统一 <code>timestamptz</code>;数据落库一律 UTC,渲染时按用户 <code>users.timezone</code> 转换</td><td>created_at · updated_at · *_at</td></tr>
+        <tr><td>JSONB 弹性字段</td><td>用于非结构化或快速演进的属性,新增字段不需要改 schema</td><td>settings · runtime_config · context · details · metadata</td></tr>
+        <tr><td>软删除 / 归档</td><td>用 <code>archived_at</code> 时间戳代替删除,便于审计与恢复</td><td>agents.archived_at · squads.archived_at</td></tr>
+        <tr><td>双向迁移</td><td>每个迁移对应 <code>NNN_xxx.up.sql</code> + <code>NNN_xxx.down.sql</code>(80+ 个文件)</td><td>server/migrations/</td></tr>
+        <tr><td>sqlc 生成访问层</td><td>所有数据库访问经 <code>db.Queries</code>;手写 SQL 全部在 <code>pkg/db/queries/*.sql</code></td><td>handler/service 不允许直接写 SQL</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    Multica · 数据模型 ER 图 · 基于 sqlc 生成的 <code>models.go</code> · 后续新增表请同步更新 ER 图与速查表。
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>04 · CoreProvider · Multica 深度解析</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb">
+    <a href="../overview.html">项目速览</a> <span>›</span>
+    <a href="index.html">关键模块深度解析</a> <span>›</span>
+    <span>04 · CoreProvider</span>
+  </div>
+
+  <div class="title-block">
+    <h1>CoreProvider · 应用启动装配的"主板"</h1>
+    <div class="path">packages/core/platform/core-provider.tsx</div>
+    <p class="lede">
+      CoreProvider 是 Web、Desktop、(将来的)其他客户端共同的入口。它把 ApiClient、所有 Zustand stores、QueryClient、WSProvider、I18nProvider 一次性装配好,
+      并且<strong>用模块级单例保证只装配一次</strong>,即便组件树重渲染或 React Strict Mode 双调用。
+    </p>
+  </div>
+
+  <section>
+    <h2>Props 形状</h2>
+    <pre>type CoreProviderProps = {
+  baseUrl: string;
+  cookieAuth?: boolean;            <span class="c">// Web=true · Desktop=false</span>
+  storage: StorageAdapter;          <span class="c">// localStorage · electron-store · in-memory</span>
+  identity: { platform: <span class="s">"web"</span> | <span class="s">"desktop"</span> | <span class="s">"mobile"</span>; version: string; os?: string };
+  onLogin?: () =&gt; void;
+  onLogout?: () =&gt; void;
+  i18n?: I18nConfig;
+  children: ReactNode;
+}</pre>
+    <p class="muted">注意:CoreProvider 不接受 ApiClient、stores、QueryClient 这些重对象 —— 它<strong>自己创建</strong>,以保证整个进程里这些对象唯一。</p>
+  </section>
+
+  <section>
+    <h2>装配顺序</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 880 420" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="12">
+        <defs>
+          <marker id="ar5" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+        </defs>
+
+        <rect x="20" y="20" width="200" height="50" rx="8" fill="#6366f1" />
+        <text x="120" y="42" fill="#fff" text-anchor="middle" font-weight="600">CoreProvider mount</text>
+        <text x="120" y="58" fill="#fff" text-anchor="middle" font-size="10">props 校验</text>
+
+        <rect x="20" y="100" width="200" height="40" rx="8" class="svg-fill-surface" stroke-width="1.5" stroke="#6366f1" />
+        <text x="120" y="125" class="svg-text" text-anchor="middle">① getOrInitCore()</text>
+
+        <rect x="280" y="100" width="220" height="60" rx="8" class="svg-fill-surface-2" stroke-width="1" stroke="#a1a1aa" />
+        <text x="390" y="125" class="svg-text" text-anchor="middle" font-weight="600">模块级单例 cache</text>
+        <text x="390" y="143" class="svg-text-muted" text-anchor="middle" font-size="11">key = baseUrl + cookieAuth</text>
+
+        <line x1="220" y1="120" x2="280" y2="125" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar5)" />
+
+        <rect x="560" y="100" width="280" height="60" rx="8" class="svg-fill-surface" stroke-width="1" stroke="#a1a1aa" />
+        <text x="700" y="125" class="svg-text" text-anchor="middle">命中 → 复用</text>
+        <text x="700" y="143" class="svg-text-muted" text-anchor="middle" font-size="11">React 19 双调用 / HMR 友好</text>
+
+        <line x1="500" y1="125" x2="560" y2="125" stroke="#10b981" stroke-width="1" marker-end="url(#ar5)" />
+
+        <rect x="20" y="170" width="200" height="40" rx="8" class="svg-fill-surface" stroke-width="1.5" stroke="#6366f1" />
+        <text x="120" y="195" class="svg-text" text-anchor="middle">② new ApiClient</text>
+
+        <rect x="20" y="220" width="200" height="40" rx="8" class="svg-fill-surface" stroke-width="1.5" stroke="#6366f1" />
+        <text x="120" y="245" class="svg-text" text-anchor="middle">③ create stores</text>
+
+        <rect x="280" y="220" width="220" height="40" rx="8" class="svg-fill-surface-2" stroke-width="1" stroke="#a1a1aa" />
+        <text x="390" y="245" class="svg-text" text-anchor="middle">auth · workspace · ui · ...</text>
+        <line x1="220" y1="240" x2="280" y2="240" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar5)" />
+
+        <rect x="20" y="270" width="200" height="40" rx="8" class="svg-fill-surface" stroke-width="1.5" stroke="#6366f1" />
+        <text x="120" y="295" class="svg-text" text-anchor="middle">④ new QueryClient</text>
+
+        <rect x="280" y="270" width="220" height="40" rx="8" class="svg-fill-surface-2" stroke-width="1" stroke="#a1a1aa" />
+        <text x="390" y="295" class="svg-text" text-anchor="middle">staleTime / retry 默认</text>
+        <line x1="220" y1="290" x2="280" y2="290" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar5)" />
+
+        <rect x="20" y="320" width="200" height="40" rx="8" class="svg-fill-surface" stroke-width="1.5" stroke="#6366f1" />
+        <text x="120" y="345" class="svg-text" text-anchor="middle">⑤ render tree</text>
+
+        <rect x="280" y="320" width="560" height="40" rx="8" class="svg-fill-surface-2" stroke-width="1" stroke="#a1a1aa" />
+        <text x="560" y="338" class="svg-text" text-anchor="middle" font-weight="600">QueryClientProvider › StoreProvider › I18nProvider › WSProvider › children</text>
+        <text x="560" y="354" class="svg-text-muted" text-anchor="middle" font-size="11">外层最稳定,内层依赖外层</text>
+        <line x1="220" y1="340" x2="280" y2="340" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar5)" />
+
+        <rect x="20" y="375" width="820" height="36" rx="8" class="svg-fill-surface" stroke-width="1" stroke-dasharray="4 4" stroke="#a1a1aa" />
+        <text x="430" y="397" class="svg-text-muted" text-anchor="middle" font-size="11">⑥ AuthBootstrap effect: 启动时检查持久化 token / cookie,refreshMe 同步用户身份</text>
+      </svg>
+      <figcaption>图 4.1 · CoreProvider 的 6 步装配:模块级单例 + 由外到内的 Provider 嵌套顺序</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>为什么是模块级单例,而不是 useMemo?</h2>
+    <p>React 18+ 的 Strict Mode 会刻意双调用组件函数与 effect,以暴露副作用问题。如果 ApiClient / WS / QueryClient 用 <code>useMemo</code> 创建,有可能在某些重渲染场景被重新创建,导致:</p>
+    <ul>
+      <li>WS 连接被重新建立,服务端短时看到两条连接</li>
+      <li>QueryClient 替换,所有 active query 失效</li>
+      <li>setToken 后短暂出现"半身份"状态</li>
+    </ul>
+    <p>所以 CoreProvider 用一个简单的模块级 <code>let core: CoreInstance | null = null</code>,首次进入按 props 初始化、写入;后续直接复用。<strong>这天然契合 SPA 的"单例"假设。</strong></p>
+    <div class="callout warn">
+      <p class="callout-title">SSR 注意</p>
+      <p class="callout-body">Next.js App Router 下,这个单例 <em>只在客户端</em> 起作用 —— RSC 与 server 渲染走不到 CoreProvider(它带 "use client")。所以不会污染请求间的状态。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>与外部环境的契约</h2>
+    <table>
+      <thead><tr><th>外部输入</th><th>谁提供</th><th>注意</th></tr></thead>
+      <tbody>
+        <tr><td><code>baseUrl</code></td><td>web: NEXT_PUBLIC_API_URL · desktop: 用户在登录页输入</td><td>切换需要重新初始化进程,运行时不允许变更</td></tr>
+        <tr><td><code>storage</code></td><td>web: <code>BrowserStorage(localStorage)</code> · desktop: <code>ElectronStore</code> · ssr: <code>InMemoryStorage</code></td><td>必须实现 <code>get/set/remove/subscribe</code> 接口</td></tr>
+        <tr><td><code>cookieAuth</code></td><td>web 必须 true,desktop 必须 false</td><td>影响 <code>AuthStore</code>、<code>ApiClient</code> 与 WS 的握手方式</td></tr>
+        <tr><td><code>identity</code></td><td>app 启动时静态计算</td><td>会被 ApiClient 加到 <code>X-Client-*</code> header,WS 也会带</td></tr>
+        <tr><td><code>onLogin / onLogout</code></td><td>app 自定义</td><td>web 用来跳转,desktop 用来同步 daemon token</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>消费者怎么用</h2>
+    <pre><span class="c">// apps/web/components/web-providers.tsx</span>
+&lt;CoreProvider
+  baseUrl={baseUrl}
+  cookieAuth
+  storage={browserStorage}
+  identity={{ platform: <span class="s">"web"</span>, version }}
+  i18n={i18nConfig}
+&gt;
+  {children}
+&lt;/CoreProvider&gt;
+
+<span class="c">// apps/desktop/.../App.tsx</span>
+&lt;CoreProvider
+  baseUrl={cfg.serverUrl}
+  storage={electronStorage}
+  identity={{ platform: <span class="s">"desktop"</span>, version, os }}
+  onLogin={() =&gt; daemonAPI.syncToken(token)}
+  onLogout={() =&gt; daemonAPI.clearToken()}
+&gt;
+  &lt;RouterProvider router={router} /&gt;
+&lt;/CoreProvider&gt;</pre>
+    <p class="muted">两端唯一的差异是 props,内部 Provider 树完全一致。这是为什么 packages/views 能在两边共享而无需任何条件分支。</p>
+  </section>
+
+  <div class="nav-prev-next">
+    <a href="03-ws-client-and-hub.html">
+      <span class="label">‹ 上一个</span>
+      03 · WSClient × realtime.Hub
+    </a>
+    <a href="05-workspace-storage.html">
+      <span class="label">下一个 ›</span>
+      05 · setCurrentWorkspace
+    </a>
+  </div>
+
+  <footer>Multica · 关键模块深度解析 · 04</footer>
+</div>
+</body>
+</html>

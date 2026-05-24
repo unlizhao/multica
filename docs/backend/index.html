@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multica · Go 后端结构与核心流程</title>
+<link rel="stylesheet" href="../deep-dive/style.css" />
+<style>
+  /* ========= 通用图表容器 ========= */
+  .figure {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    margin: 0 0 16px;
+    overflow-x: auto;
+  }
+  .figure figcaption {
+    font-size: 12px;
+    color: var(--fg-muted);
+    margin-top: 10px;
+    text-align: center;
+  }
+  .figure svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+  /* SVG 内的元素颜色统一走 CSS 变量,以便暗色自适应 */
+  svg .b-stroke { stroke: var(--border-strong); }
+  svg .b-fill   { fill: var(--surface-2); }
+  svg .b-text   { fill: var(--fg); font-family: var(--font-sans); font-size: 12px; }
+  svg .b-mono   { fill: var(--fg); font-family: var(--font-mono); font-size: 11px; }
+  svg .b-muted  { fill: var(--fg-muted); font-size: 11px; }
+  svg .b-line   { stroke: var(--fg-subtle); fill: none; }
+  svg .b-arrow  { fill: var(--fg-subtle); }
+  svg .b-brand  { fill: color-mix(in oklab, var(--brand) 14%, transparent); stroke: var(--brand); }
+  svg .b-info   { fill: color-mix(in oklab, var(--info)  14%, transparent); stroke: var(--info);  }
+  svg .b-warn   { fill: color-mix(in oklab, var(--warning) 16%, transparent); stroke: var(--warning); }
+  svg .b-ok     { fill: color-mix(in oklab, var(--success) 16%, transparent); stroke: var(--success); }
+  svg .b-err    { fill: color-mix(in oklab, var(--destructive) 14%, transparent); stroke: var(--destructive); }
+  svg .b-dim    { fill: var(--surface-2); stroke: var(--border-strong); }
+
+  @media (prefers-color-scheme: dark) {
+    svg .b-text  { fill: #f4f4f5; }
+    svg .b-mono  { fill: #f4f4f5; }
+    svg .b-muted { fill: #a1a1aa; }
+  }
+
+  /* ========= 表格 ========= */
+  table.tbl {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    font-size: 13px;
+    margin: 0 0 16px;
+  }
+  table.tbl th, table.tbl td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.tbl th { font-weight: 500; color: var(--fg-muted); background: var(--surface-2); font-size: 12px; }
+  table.tbl tr:last-child td { border-bottom: none; }
+  table.tbl td.k { font-family: var(--font-mono); font-size: 12px; color: var(--brand); width: 220px; }
+  table.tbl td.lbl { font-family: var(--font-mono); font-size: 12px; color: var(--info); white-space: nowrap; }
+
+  /* ========= 状态标签 ========= */
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    font-family: var(--font-mono);
+  }
+  .pill.ok   { color: var(--success); border-color: color-mix(in oklab, var(--success) 30%, var(--border)); }
+  .pill.warn { color: var(--warning); border-color: color-mix(in oklab, var(--warning) 30%, var(--border)); }
+  .pill.err  { color: var(--destructive); border-color: color-mix(in oklab, var(--destructive) 30%, var(--border)); }
+  .pill.info { color: var(--info); border-color: color-mix(in oklab, var(--info) 30%, var(--border)); }
+  .pill.brand{ color: var(--brand); border-color: color-mix(in oklab, var(--brand) 30%, var(--border)); }
+
+  /* ========= TOC ========= */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    margin: 0 0 24px;
+  }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc li { margin: 2px 0; color: var(--fg); }
+  .toc li code { background: transparent; padding: 0; color: var(--fg-muted); font-size: 11px; }
+
+  /* ========= 章节子节点小标题 ========= */
+  h4.sub { font-size: 13px; font-weight: 500; margin: 18px 0 8px; color: var(--fg); }
+  h4.sub::before { content: "▸ "; color: var(--fg-subtle); }
+
+  ul.bul li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb"><a href="../overview.html">← 项目速览</a> · <a href="../structure/index.html">目录结构</a> · <a href="../er/index.html">ER 图</a> · <a href="../deep-dive/index.html">深度解析</a></div>
+
+  <div class="title-block">
+    <h1>Go 后端结构与核心流程</h1>
+    <p class="path">server/ — Go 1.26 · Chi router · sqlc + pgx/v5 · gorilla/websocket · go-redis/v9</p>
+    <p class="lede">
+      Multica 后端是<strong>单一 Go 模块</strong>(<code>server/go.mod</code>)同时承担 HTTP API、WebSocket
+      实时层、本地 daemon 通信、CLI、后台调度等多重职责。本文按"<strong>一图一表一段叙事</strong>"的方式
+      拆解九块内容:① 启动装配 → ② 路由与中间件 → ③ Task 三大写入路径 → ④ 状态机 →
+      ⑤ Realtime / DaemonWS / Redis Relay → ⑥ Events Bus 三类监听器 →
+      ⑦ DB 访问层 → ⑧ 后台 goroutine 矩阵 → ⑨ 优雅关闭顺序。
+    </p>
+  </div>
+
+  <div class="toc">
+    <strong style="font-size: 12px; color: var(--fg-muted);">目录</strong>
+    <ol>
+      <li><a href="#sec-startup">启动装配序列</a> <code>cmd/server/main.go</code></li>
+      <li><a href="#sec-router">HTTP 路由与中间件栈</a> <code>cmd/server/router.go</code></li>
+      <li><a href="#sec-task-paths">Task 三大写入路径</a> <code>service/task.go</code></li>
+      <li><a href="#sec-task-fsm">Task 全生命周期状态机</a> <code>queued → completed/failed</code></li>
+      <li><a href="#sec-realtime">Realtime Hub + DaemonWS + Redis Relay</a> <code>internal/realtime · internal/daemonws</code></li>
+      <li><a href="#sec-events">Events Bus 与三类监听器</a> <code>internal/events · cmd/server/*_listeners.go</code></li>
+      <li><a href="#sec-bg">后台 goroutine 矩阵</a> <code>sweeper · scheduler · heartbeat · failure_monitor · dbstats</code></li>
+      <li><a href="#sec-db">DB 访问层(sqlc + pgx)</a> <code>pkg/db/generated</code></li>
+      <li><a href="#sec-shutdown">优雅关闭顺序</a> <code>SIGINT/SIGTERM</code></li>
+    </ol>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ① 启动装配                                                  -->
+  <!-- ========================================================== -->
+  <section id="sec-startup">
+    <h2>① 启动装配序列 — main.go 是怎么把整个后端"接起来"的</h2>
+    <p>
+      整段 <code>main()</code> 是一份<strong>有序的依赖装配清单</strong>。任何一个对象都必须等它依赖的对象先创建好,
+      所以阅读 main.go 等于阅读"后端从冷启动到接受请求的拓扑顺序"。
+      <a href="file:///d:/workdir/mu/multica/server/cmd/server/main.go">main.go</a>
+      第 113-355 行覆盖了从环境变量解析、连接池建立、Hub/Bus 实例化、Redis Relay 选模、监听器注册、HTTP 服务器启动,直到信号优雅关闭的完整流程。
+    </p>
+
+    <h4 class="sub">装配序列图</h4>
+    <figure class="figure">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 540" width="880" height="540" role="img" aria-label="Server startup wiring sequence">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="b-arrow" />
+          </marker>
+        </defs>
+
+        <!-- 顶部:env 与 logger -->
+        <rect x="20"  y="20"  width="160" height="40" rx="6" class="b-dim b-stroke" stroke-width="1" />
+        <text x="100" y="38" text-anchor="middle" class="b-text">logger.Init()</text>
+        <text x="100" y="52" text-anchor="middle" class="b-muted">env warnings</text>
+
+        <rect x="200" y="20"  width="160" height="40" rx="6" class="b-dim b-stroke" stroke-width="1" />
+        <text x="280" y="38" text-anchor="middle" class="b-text">newDBPool(DATABASE_URL)</text>
+        <text x="280" y="52" text-anchor="middle" class="b-muted">pgxpool · Ping</text>
+
+        <rect x="380" y="20"  width="160" height="40" rx="6" class="b-brand b-stroke" stroke-width="1" />
+        <text x="460" y="38" text-anchor="middle" class="b-text">events.New()</text>
+        <text x="460" y="52" text-anchor="middle" class="b-muted">Bus(同步 pub/sub)</text>
+
+        <rect x="560" y="20"  width="140" height="40" rx="6" class="b-info b-stroke" stroke-width="1" />
+        <text x="630" y="38" text-anchor="middle" class="b-text">realtime.NewHub()</text>
+        <text x="630" y="52" text-anchor="middle" class="b-muted">go hub.Run()</text>
+
+        <rect x="720" y="20"  width="140" height="40" rx="6" class="b-info b-stroke" stroke-width="1" />
+        <text x="790" y="38" text-anchor="middle" class="b-text">daemonws.NewHub()</text>
+        <text x="790" y="52" text-anchor="middle" class="b-muted">daemonHub</text>
+
+        <!-- 第二层:Redis 路径 -->
+        <rect x="20"  y="100" width="840" height="80" rx="6" class="b-dim b-stroke" stroke-width="1" />
+        <text x="40"  y="120" class="b-text">REDIS_URL ≠ ""  ⇒  按 REALTIME_RELAY_MODE 选 relay 实例</text>
+        <text x="40"  y="142" class="b-muted">sharded(默认):ShardedStreamRelay → 拥有 daemon-runtime 通道,任务唤醒走 RelayNotifier</text>
+        <text x="40"  y="158" class="b-muted">dual:sharded + legacy 双写,用 MirroredRelay 做平滑迁移</text>
+        <text x="40"  y="174" class="b-muted">legacy:旧的 RedisRelay,无 daemon-runtime 通道(daemon 唤醒退化为本地 hub)</text>
+
+        <!-- 第三层:queries / scope-authorizer / listeners -->
+        <rect x="20"  y="210" width="200" height="44" rx="6" class="b-dim b-stroke" stroke-width="1" />
+        <text x="120" y="228" text-anchor="middle" class="b-text">queries := db.New(pool)</text>
+        <text x="120" y="244" text-anchor="middle" class="b-muted">sqlc 生成的强类型 API</text>
+
+        <rect x="240" y="210" width="200" height="44" rx="6" class="b-info b-stroke" stroke-width="1" />
+        <text x="340" y="228" text-anchor="middle" class="b-text">hub.SetAuthorizer(...)</text>
+        <text x="340" y="244" text-anchor="middle" class="b-muted">scope 订阅鉴权(workspace/task/chat)</text>
+
+        <rect x="460" y="210" width="380" height="44" rx="6" class="b-brand b-stroke" stroke-width="1" />
+        <text x="650" y="228" text-anchor="middle" class="b-text">registerListeners(bus, broadcaster)</text>
+        <text x="650" y="244" text-anchor="middle" class="b-muted">+ subscriber / activity / notification 三组监听器(顺序敏感)</text>
+
+        <!-- 第四层:handler.New + router -->
+        <rect x="20"  y="280" width="400" height="44" rx="6" class="b-info b-stroke" stroke-width="1" />
+        <text x="220" y="298" text-anchor="middle" class="b-text">heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(...)</text>
+        <text x="220" y="314" text-anchor="middle" class="b-muted">先创建,后续注入 Handler &amp; Stop 在 Shutdown 之后</text>
+
+        <rect x="440" y="280" width="400" height="44" rx="6" class="b-brand b-stroke" stroke-width="1" />
+        <text x="640" y="298" text-anchor="middle" class="b-text">NewRouterWithOptions(pool, hub, bus, ...)</text>
+        <text x="640" y="314" text-anchor="middle" class="b-muted">router.go 装配全部 endpoint &amp; 中间件链</text>
+
+        <!-- 第五层:taskSvc + autopilot + 后台 goroutine -->
+        <rect x="20"  y="350" width="260" height="44" rx="6" class="b-ok b-stroke" stroke-width="1" />
+        <text x="150" y="368" text-anchor="middle" class="b-text">taskSvc = service.NewTaskService(...)</text>
+        <text x="150" y="384" text-anchor="middle" class="b-muted">+ Analytics + EmptyClaim</text>
+
+        <rect x="300" y="350" width="260" height="44" rx="6" class="b-ok b-stroke" stroke-width="1" />
+        <text x="430" y="368" text-anchor="middle" class="b-text">autopilotSvc = service.NewAutopilotService(...)</text>
+        <text x="430" y="384" text-anchor="middle" class="b-muted">+ registerAutopilotListeners(bus, ..)</text>
+
+        <rect x="580" y="350" width="260" height="44" rx="6" class="b-ok b-stroke" stroke-width="1" />
+        <text x="710" y="368" text-anchor="middle" class="b-text">livenessStore</text>
+        <text x="710" y="384" text-anchor="middle" class="b-muted">handler 与 sweeper 必须使用同一个</text>
+
+        <!-- 第六层:5 条 goroutine -->
+        <rect x="20"  y="420" width="820" height="60" rx="6" class="b-warn b-stroke" stroke-width="1" />
+        <text x="40"  y="442" class="b-text">go runRuntimeSweeper · go heartbeatScheduler.Run · go runAutopilotScheduler · go runAutopilotFailureMonitor · go runDBStatsLogger</text>
+        <text x="40"  y="462" class="b-muted">sweepCtx 由 sweepCancel 控制(HTTP 关停后再 cancel),autopilotCtx 由 autopilotCancel(早于 HTTP cancel)</text>
+
+        <!-- 第七层:HTTP server -->
+        <rect x="20"  y="500" width="820" height="30" rx="6" class="b-info b-stroke" stroke-width="1" />
+        <text x="430" y="520" text-anchor="middle" class="b-text">srv.ListenAndServe()  ▸  signal.Notify(quit, SIGINT, SIGTERM)  ▸  &lt;-quit  ▸  graceful shutdown</text>
+
+        <!-- 连接箭头(纵向) -->
+        <path d="M460 60 L460 100" class="b-line" stroke-width="1.2" marker-end="url(#arr)" />
+        <path d="M340 180 L340 210" class="b-line" stroke-width="1.2" marker-end="url(#arr)" />
+        <path d="M460 254 L460 280" class="b-line" stroke-width="1.2" marker-end="url(#arr)" />
+        <path d="M430 324 L430 350" class="b-line" stroke-width="1.2" marker-end="url(#arr)" />
+        <path d="M430 394 L430 420" class="b-line" stroke-width="1.2" marker-end="url(#arr)" />
+        <path d="M430 480 L430 500" class="b-line" stroke-width="1.2" marker-end="url(#arr)" />
+      </svg>
+      <figcaption>装配序列从上到下:env → DB → Bus/Hub → Redis Relay → queries → listeners → router → 五条 goroutine → 监听端口</figcaption>
+    </figure>
+
+    <h4 class="sub">关键依赖关系</h4>
+    <table class="tbl">
+      <thead><tr><th>组件</th><th>依赖谁</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td class="k">events.Bus</td><td>无</td><td>同步 pub/sub,所有 handler 写完 DB 后 <code>bus.Publish()</code> 一次</td></tr>
+        <tr><td class="k">realtime.Hub</td><td>scope authorizer(由 queries 构造)</td><td>持有所有浏览器 WS 连接;按 <code>{type, id}</code> 维护 room</td></tr>
+        <tr><td class="k">daemonws.Hub</td><td>无</td><td>本地 daemon 私有通道;同时实现 TaskWakeupNotifier</td></tr>
+        <tr><td class="k">Redis Relay</td><td>relayWriteRedis + relayReadRedis(独立连接池)</td><td>跨节点 fanout;daemon 唤醒走单独 stream(sharded 模式)</td></tr>
+        <tr><td class="k">broadcaster</td><td>hub + relay(可选)</td><td>对外抽象;无 Redis 时退化为 hub 本身</td></tr>
+        <tr><td class="k">TaskService</td><td>queries + pool(tx) + hub + bus + wakeup + analytics + EmptyClaim</td><td>Task 全生命周期 API</td></tr>
+        <tr><td class="k">AutopilotService</td><td>queries + tx + bus + taskSvc</td><td>调度触发,创建 issue 或直接 enqueue task</td></tr>
+        <tr><td class="k">heartbeatScheduler</td><td>queries</td><td>批量 flush runtime 心跳;router 注入 daemon handler 内</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>装配的隐含约束</strong>:① <code>SetAuthorizer</code> 必须在 hub 接受首个 WS 连接前完成,否则会有竞态;
+      ② <code>registerSubscriberListeners</code> 必须先于 <code>registerNotificationListeners</code>,因为 notification listener 会读 subscribers 表;
+      ③ <code>livenessStore</code> 在 handler 路径(写心跳)与 sweeper 路径(读心跳)必须使用同一个实现,否则会出现"在线却被标 offline"的事故。
+    </div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ② 路由与中间件                                              -->
+  <!-- ========================================================== -->
+  <section id="sec-router">
+    <h2>② HTTP 路由与中间件栈 — 一条请求的旅程</h2>
+    <p>
+      <a href="file:///d:/workdir/mu/multica/server/cmd/server/router.go">router.go</a> 用 Chi 装配大约 150 个 endpoint。
+      关键在于<strong>中间件链的"分层卸载"</strong>:全局通用中间件先跑一遍,然后路由组层层叠加 Auth / 工作区 / 角色 / 限流。
+    </p>
+
+    <h4 class="sub">中间件流水线</h4>
+    <figure class="figure">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 360" width="880" height="360" role="img" aria-label="HTTP middleware pipeline">
+        <defs>
+          <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="b-arrow" />
+          </marker>
+        </defs>
+
+        <!-- 顶部:Request -->
+        <rect x="20" y="20" width="120" height="36" rx="6" class="b-info b-stroke" stroke-width="1" />
+        <text x="80" y="42" text-anchor="middle" class="b-text">HTTP Request</text>
+
+        <!-- 全局中间件链(7 个) -->
+        <g font-family="ui-monospace,monospace" font-size="11">
+          <rect x="160" y="20"  width="100" height="36" rx="4" class="b-dim b-stroke" />
+          <text x="210" y="42" text-anchor="middle" class="b-text">RequestID</text>
+          <rect x="270" y="20"  width="120" height="36" rx="4" class="b-dim b-stroke" />
+          <text x="330" y="42" text-anchor="middle" class="b-text">ClientMetadata</text>
+          <rect x="400" y="20"  width="120" height="36" rx="4" class="b-dim b-stroke" />
+          <text x="460" y="42" text-anchor="middle" class="b-text">RequestLogger</text>
+          <rect x="530" y="20"  width="110" height="36" rx="4" class="b-dim b-stroke" />
+          <text x="585" y="42" text-anchor="middle" class="b-text">HTTPMetrics</text>
+          <rect x="650" y="20"  width="100" height="36" rx="4" class="b-dim b-stroke" />
+          <text x="700" y="42" text-anchor="middle" class="b-text">Recoverer</text>
+          <rect x="760" y="20"  width="100" height="36" rx="4" class="b-dim b-stroke" />
+          <text x="810" y="42" text-anchor="middle" class="b-text">CSP + CORS</text>
+        </g>
+
+        <!-- 路由分支:三个并列分支 -->
+        <text x="20" y="100" class="b-muted">↓ 全局中间件之后,按路由路径进入不同分支:</text>
+
+        <!-- 公开路由 -->
+        <rect x="20" y="120" width="270" height="220" rx="8" class="b-ok b-stroke" stroke-width="1.2" />
+        <text x="155" y="142" text-anchor="middle" class="b-text">公开路由 / Webhook</text>
+        <text x="32" y="166" class="b-mono">/health · /readyz · /ws</text>
+        <text x="32" y="184" class="b-mono">/auth/* (login / signup / verify)</text>
+        <text x="32" y="202" class="b-mono">/api/config · /api/contact-sales</text>
+        <text x="32" y="220" class="b-mono">/uploads/* (本地存储)</text>
+        <text x="32" y="246" class="b-text" style="font-weight:500">额外中间件:</text>
+        <text x="32" y="264" class="b-mono">webhook → IPRateLimiter</text>
+        <text x="32" y="280" class="b-mono">             + WebhookRateLimiter</text>
+        <text x="32" y="296" class="b-mono">             + RefreshCloudFrontCookies</text>
+        <text x="32" y="320" class="b-muted">无需 Auth,自带 token / signature 校验</text>
+
+        <!-- Daemon API 路由 -->
+        <rect x="305" y="120" width="270" height="220" rx="8" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="440" y="142" text-anchor="middle" class="b-text">/api/daemon/*  ·  Daemon API</text>
+        <text x="317" y="166" class="b-mono">register / heartbeat / ws</text>
+        <text x="317" y="184" class="b-mono">claim / progress / complete / fail</text>
+        <text x="317" y="202" class="b-mono">messages / gc-check / recover-orphans</text>
+        <text x="317" y="220" class="b-mono">pin-session</text>
+        <text x="317" y="246" class="b-text" style="font-weight:500">中间件链:</text>
+        <text x="317" y="264" class="b-mono">DaemonAuth(queries, patCache,</text>
+        <text x="317" y="280" class="b-mono">           daemonTokenCache)</text>
+        <text x="317" y="304" class="b-muted">PAT / Daemon Token,无 cookie</text>
+        <text x="317" y="324" class="b-muted">Origin 任意(Authorization 头鉴权)</text>
+
+        <!-- 受保护用户路由 -->
+        <rect x="590" y="120" width="270" height="220" rx="8" class="b-brand b-stroke" stroke-width="1.2" />
+        <text x="725" y="142" text-anchor="middle" class="b-text">受保护路由 (浏览器)</text>
+        <text x="602" y="166" class="b-text" style="font-weight:500">通用前置中间件:</text>
+        <text x="602" y="184" class="b-mono">Auth(queries, patCache)</text>
+        <text x="602" y="202" class="b-mono">RefreshCloudFrontCookies</text>
+        <text x="602" y="226" class="b-text" style="font-weight:500">用户态 endpoint:</text>
+        <text x="602" y="244" class="b-mono">/api/me · /api/tokens · /api/inbox</text>
+        <text x="602" y="262" class="b-mono">/api/workspaces · /api/invitations</text>
+        <text x="602" y="288" class="b-text" style="font-weight:500">工作区态 endpoint:</text>
+        <text x="602" y="306" class="b-mono">+ RequireWorkspaceMember(queries)</text>
+        <text x="602" y="322" class="b-mono">issues · projects · agents · skills</text>
+        <text x="602" y="340" class="b-mono" fill="var(--fg-muted)" style="font-size:10px">+ RequireWorkspaceRole(queries, "admin")</text>
+
+        <!-- 箭头连接 -->
+        <path d="M140 38 L160 38" class="b-line" stroke-width="1.2" marker-end="url(#arr2)" />
+        <path d="M860 38 L860 88 L155 88 L155 120" class="b-line" stroke-width="1.2" marker-end="url(#arr2)" />
+        <path d="M860 38 L860 88 L440 88 L440 120" class="b-line" stroke-width="1.2" />
+        <path d="M860 38 L860 88 L725 88 L725 120" class="b-line" stroke-width="1.2" />
+      </svg>
+      <figcaption>所有 endpoint 走相同的全局中间件链;之后按 daemon / 公开 / 受保护三条分支叠加专用中间件</figcaption>
+    </figure>
+
+    <h4 class="sub">关键中间件职责拆解</h4>
+    <table class="tbl">
+      <thead><tr><th>中间件</th><th>来源</th><th>职责</th></tr></thead>
+      <tbody>
+        <tr><td class="k">RequestID</td><td>chi</td><td>注入 <code>X-Request-ID</code>,用于贯穿日志和指标</td></tr>
+        <tr><td class="k">ClientMetadata</td><td>middleware/client.go</td><td>从 UA / version 头提取客户端类型,注入 ctx</td></tr>
+        <tr><td class="k">HTTPMetrics</td><td>metrics/http.go</td><td>Prometheus histogram(label: method, route, status)</td></tr>
+        <tr><td class="k">CSP / CORS</td><td>middleware/csp.go</td><td>跨域允许列表 + 严格 CSP(WS 连接需要单独白名单)</td></tr>
+        <tr><td class="k">Auth</td><td>middleware/auth.go</td><td>JWT(cookie + CSRF) 或 PAT(<code>mul_</code> 前缀);PATCache 缓存 hash → userID 减压 DB</td></tr>
+        <tr><td class="k">DaemonAuth</td><td>middleware/daemon_auth.go</td><td>识别 daemon token,DaemonTokenCache 复用结果</td></tr>
+        <tr><td class="k">RequireWorkspaceMember</td><td>middleware/workspace.go</td><td>解析 slug / id 优先级:ctx → header → query;失败区分 400/404</td></tr>
+        <tr><td class="k">RequireWorkspaceRole(roles...)</td><td>middleware/workspace.go</td><td>叠加在 Member 之上,做 role allowlist 校验</td></tr>
+        <tr><td class="k">RefreshCloudFrontCookies</td><td>middleware/cloudfront.go</td><td>静态资源签名 cookie 续期</td></tr>
+        <tr><td class="k">WebhookRateLimiter / IPRateLimiter</td><td>middleware/ratelimit.go</td><td>对外暴露的 webhook 用 Redis 限流(autopilots / github)</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">路由分组与典型 endpoint</h4>
+    <table class="tbl">
+      <thead><tr><th>分组</th><th>前缀</th><th>代表 endpoint</th><th>鉴权</th></tr></thead>
+      <tbody>
+        <tr><td>健康检查</td><td class="lbl">/health, /readyz</td><td>liveness / readiness</td><td>无</td></tr>
+        <tr><td>WebSocket</td><td class="lbl">/ws</td><td>浏览器 realtime 通道</td><td>cookie/PAT(在 upgrade 前校验)</td></tr>
+        <tr><td>Auth</td><td class="lbl">/auth/*</td><td>signup · login · verify · refresh · logout</td><td>无(自带 token 流程)</td></tr>
+        <tr><td>Webhook</td><td class="lbl">/api/webhooks/*</td><td>autopilots/{token} · github</td><td>token / signature</td></tr>
+        <tr><td>Daemon</td><td class="lbl">/api/daemon/*</td><td>register · heartbeat · claim · progress</td><td>DaemonAuth</td></tr>
+        <tr><td>用户态</td><td class="lbl">/api/me · /api/tokens · /api/inbox</td><td>当前用户资源</td><td>Auth</td></tr>
+        <tr><td>工作区态</td><td class="lbl">/api/workspaces/{slug}/*</td><td>issues · agents · skills · runtimes · pins · attachments · comments · dashboard</td><td>Auth + WorkspaceMember (+ Role)</td></tr>
+        <tr><td>云 Runtime</td><td class="lbl">/api/workspaces/{slug}/cloud-runtime/*</td><td>启停 / 状态查询</td><td>Auth + WorkspaceRole("admin")</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>"两次身份解析"模式</strong>:用户身份(Auth)与工作区身份(WorkspaceMember)是分两步独立解析的。
+      Auth 注入 <code>X-User-ID</code> 头,Workspace 中间件读取 <code>X-User-ID</code> + slug 反查 <code>workspace_members</code> 表,
+      把 <code>workspaceID</code> 与 <code>member</code> 写进 ctx,handler 直接消费。
+      这样的好处是 Daemon API 与 Browser API 共用 WorkspaceMember,但身份来源(PAT vs JWT)互不影响。
+    </div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ③ Task 三大写入路径                                         -->
+  <!-- ========================================================== -->
+  <section id="sec-task-paths">
+    <h2>③ Task 三大写入路径 — Issue / Chat / Quick-create / Autopilot</h2>
+    <p>
+      <a href="file:///d:/workdir/mu/multica/server/internal/service/task.go">service/task.go</a>
+      是 Agent 协作的"中央调度",所有外部触发最终都会落到 <code>agent_task_queue</code> 表。
+      入口分四条:Issue 指派 / @-mention、Chat 消息、Quick-create 一次性提示词、Autopilot 自动触发。
+    </p>
+
+    <h4 class="sub">四条写入路径俯视图</h4>
+    <figure class="figure">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" width="880" height="380" role="img" aria-label="Task enqueue paths">
+        <defs>
+          <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="b-arrow" />
+          </marker>
+        </defs>
+
+        <!-- 四个入口 -->
+        <rect x="20"  y="20" width="200" height="60" rx="8" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="120" y="42" text-anchor="middle" class="b-text">① Issue 指派 / 评论 @</text>
+        <text x="120" y="60" text-anchor="middle" class="b-mono">handler/issue.go · comment.go</text>
+        <text x="120" y="74" text-anchor="middle" class="b-muted">EnqueueTaskForIssue / Mention / SquadLeader</text>
+
+        <rect x="240" y="20" width="200" height="60" rx="8" class="b-brand b-stroke" stroke-width="1.2" />
+        <text x="340" y="42" text-anchor="middle" class="b-text">② Chat 消息</text>
+        <text x="340" y="60" text-anchor="middle" class="b-mono">handler/chat.go</text>
+        <text x="340" y="74" text-anchor="middle" class="b-muted">EnqueueChatTask(chatSession)</text>
+
+        <rect x="460" y="20" width="200" height="60" rx="8" class="b-ok b-stroke" stroke-width="1.2" />
+        <text x="560" y="42" text-anchor="middle" class="b-text">③ Quick-create</text>
+        <text x="560" y="60" text-anchor="middle" class="b-mono">subscriber 触发器</text>
+        <text x="560" y="74" text-anchor="middle" class="b-muted">EnqueueQuickCreateTask</text>
+
+        <rect x="680" y="20" width="180" height="60" rx="8" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="770" y="42" text-anchor="middle" class="b-text">④ Autopilot</text>
+        <text x="770" y="60" text-anchor="middle" class="b-mono">service/autopilot.go</text>
+        <text x="770" y="74" text-anchor="middle" class="b-muted">DispatchAutopilot(run_only)</text>
+
+        <!-- 共用核心 -->
+        <rect x="180" y="140" width="520" height="80" rx="8" class="b-brand b-stroke" stroke-width="1.5" />
+        <text x="440" y="166" text-anchor="middle" class="b-text" style="font-weight:500">TaskService.broadcastTaskEvent + NotifyTaskEnqueued</text>
+        <text x="440" y="186" text-anchor="middle" class="b-mono">queries.CreateAgentTask / CreateChatTask / CreateQuickCreateTask</text>
+        <text x="440" y="204" text-anchor="middle" class="b-muted">→ INSERT agent_task_queue (status='queued') → bus.Publish(task:queued)</text>
+
+        <!-- 入队后的两路下游 -->
+        <rect x="60"  y="260" width="320" height="100" rx="8" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="220" y="284" text-anchor="middle" class="b-text">浏览器 WS 通道</text>
+        <text x="72" y="306" class="b-mono">broadcastTaskEvent → realtime.Hub</text>
+        <text x="72" y="324" class="b-mono">scope=workspace:{wsID} 推送 task:queued</text>
+        <text x="72" y="346" class="b-muted">React Query 收到 invalidation 后重拉列表</text>
+
+        <rect x="500" y="260" width="320" height="100" rx="8" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="660" y="284" text-anchor="middle" class="b-text">Daemon 唤醒通道</text>
+        <text x="512" y="306" class="b-mono">NotifyTaskAvailable(runtimeID, taskID)</text>
+        <text x="512" y="324" class="b-mono">daemonHub 本地 + Redis stream(sharded)</text>
+        <text x="512" y="346" class="b-muted">+ EmptyClaim.Bump(runtimeID) 失效"空"缓存</text>
+
+        <!-- 箭头 -->
+        <path d="M120 80 L370 140" class="b-line" stroke-width="1.2" marker-end="url(#arr3)" />
+        <path d="M340 80 L420 140" class="b-line" stroke-width="1.2" marker-end="url(#arr3)" />
+        <path d="M560 80 L470 140" class="b-line" stroke-width="1.2" marker-end="url(#arr3)" />
+        <path d="M770 80 L520 140" class="b-line" stroke-width="1.2" marker-end="url(#arr3)" />
+        <path d="M340 220 L220 260" class="b-line" stroke-width="1.2" marker-end="url(#arr3)" />
+        <path d="M540 220 L660 260" class="b-line" stroke-width="1.2" marker-end="url(#arr3)" />
+      </svg>
+      <figcaption>四条入口最终汇聚到同一段 INSERT,然后并行 fanout 到浏览器 WS + Daemon 唤醒</figcaption>
+    </figure>
+
+    <h4 class="sub">逐条写入路径的细节</h4>
+
+    <table class="tbl">
+      <thead><tr><th>路径</th><th>触发时机</th><th>核心 service 方法</th><th>必要前置校验</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>① Issue / Squad Leader</strong></td>
+          <td>用户把 issue 指派给某 agent / squad,或在评论里 @ 它</td>
+          <td><code>EnqueueTaskForIssue</code> · <code>EnqueueTaskForSquadLeader</code> · <code>EnqueueTaskForMention</code></td>
+          <td>agent 未归档 · runtime 已注册 · 没有重复 active task</td>
+        </tr>
+        <tr>
+          <td><strong>② Chat</strong></td>
+          <td>用户在 chat 会话发送消息后</td>
+          <td><code>EnqueueChatTask(chatSession)</code></td>
+          <td>agent 未归档 · agent.runtime_id 非空 · priority=2(中)</td>
+        </tr>
+        <tr>
+          <td><strong>③ Quick-create</strong></td>
+          <td>"快速创建" 模板提交,不附 issue</td>
+          <td><code>EnqueueQuickCreateTask</code></td>
+          <td>同 Chat,但走独立 subscriber 链以便审计</td>
+        </tr>
+        <tr>
+          <td><strong>④ Autopilot · run_only</strong></td>
+          <td>schedule 触发或 webhook 触发</td>
+          <td><code>AutopilotService.DispatchAutopilot</code> → <code>TaskService.Enqueue*</code></td>
+          <td><strong>触发时准入</strong>:assignee runtime 必须 online,否则 <code>recordSkippedRun</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">为什么所有 Enqueue 都必须遵循同样的"先广播 WS、再唤醒 daemon"次序</h4>
+    <p>
+      <code>EnqueueTaskForIssue</code> 与 <code>EnqueueChatTask</code> 末尾都明确写着:
+      <code>broadcastTaskEvent(EventTaskQueued)</code> → <code>NotifyTaskEnqueued</code>。
+      这个顺序<strong>不能颠倒</strong>。原因是 daemon 接到唤醒后会立刻调
+      <code>/api/daemon/claim</code>,如果 WS 广播在后,有概率出现:
+      claim 已经把 task 状态改成 <code>dispatched</code>,但浏览器还没收到 <code>task:queued</code>,
+      于是先看到 <code>task:dispatched</code> 而 list 缓存里没这条记录,UI 上会"凭空跳出 dispatched 卡片"。
+      把 <code>queued</code> 广播放在前面就能保证两端顺序一致。
+    </p>
+
+    <div class="callout warn">
+      <strong>EmptyClaim 缓存的失效时机</strong>:每次 Enqueue 都会调 <code>EmptyClaim.Bump(runtimeID)</code>,
+      让"该 runtime 没有 queued task"这个推断作废。同时 <code>ClaimTaskForRuntime</code> 在 SELECT 之前会先采样
+      <code>preSelectVersion</code>,SELECT 完成后 <code>MarkEmpty(runtimeID, preSelectVersion)</code>;
+      如果中途有人 Bump,后续 IsEmpty 检查时版本不匹配就会拒绝命中,从而消除"刚入队的 task 因为缓存还在被忽略"的窗口。
+    </div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ④ Task 状态机                                               -->
+  <!-- ========================================================== -->
+  <section id="sec-task-fsm">
+    <h2>④ Task 全生命周期状态机 — queued → dispatched → running → completed/failed/cancelled</h2>
+    <p>
+      Task 的状态由<strong>四方协作者</strong>推进:用户(取消)、API server(入队 / 失败标记 / 清扫)、
+      daemon(claim / start / progress / complete / fail)、sweeper(超时回收)。
+    </p>
+
+    <h4 class="sub">状态机图</h4>
+    <figure class="figure">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" width="880" height="420" role="img" aria-label="Task FSM">
+        <defs>
+          <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="b-arrow" />
+          </marker>
+        </defs>
+
+        <!-- queued -->
+        <ellipse cx="120" cy="70" rx="80" ry="36" class="b-info b-stroke" stroke-width="1.5" />
+        <text x="120" y="68" text-anchor="middle" class="b-text" style="font-weight:500">queued</text>
+        <text x="120" y="86" text-anchor="middle" class="b-muted">CreateAgentTask</text>
+
+        <!-- dispatched -->
+        <ellipse cx="430" cy="70" rx="90" ry="36" class="b-warn b-stroke" stroke-width="1.5" />
+        <text x="430" y="68" text-anchor="middle" class="b-text" style="font-weight:500">dispatched</text>
+        <text x="430" y="86" text-anchor="middle" class="b-muted">ClaimAgentTask</text>
+
+        <!-- running -->
+        <ellipse cx="740" cy="70" rx="80" ry="36" class="b-brand b-stroke" stroke-width="1.5" />
+        <text x="740" y="68" text-anchor="middle" class="b-text" style="font-weight:500">running</text>
+        <text x="740" y="86" text-anchor="middle" class="b-muted">StartAgentTask</text>
+
+        <!-- 终态 -->
+        <ellipse cx="200" cy="280" rx="80" ry="36" class="b-ok b-stroke" stroke-width="1.5" />
+        <text x="200" y="278" text-anchor="middle" class="b-text" style="font-weight:500">completed</text>
+        <text x="200" y="296" text-anchor="middle" class="b-muted">CompleteAgentTask (tx)</text>
+
+        <ellipse cx="440" cy="280" rx="80" ry="36" class="b-err b-stroke" stroke-width="1.5" />
+        <text x="440" y="278" text-anchor="middle" class="b-text" style="font-weight:500">failed</text>
+        <text x="440" y="296" text-anchor="middle" class="b-muted">FailAgentTask</text>
+
+        <ellipse cx="680" cy="280" rx="80" ry="36" class="b-dim b-stroke" stroke-width="1.5" />
+        <text x="680" y="278" text-anchor="middle" class="b-text" style="font-weight:500">cancelled</text>
+        <text x="680" y="296" text-anchor="middle" class="b-muted">CancelAgentTask</text>
+
+        <!-- 主流转箭头 -->
+        <path d="M200 70 L340 70" class="b-line" stroke-width="1.4" marker-end="url(#arr4)" />
+        <text x="270" y="60" text-anchor="middle" class="b-mono">claim</text>
+
+        <path d="M520 70 L660 70" class="b-line" stroke-width="1.4" marker-end="url(#arr4)" />
+        <text x="590" y="60" text-anchor="middle" class="b-mono">start</text>
+
+        <path d="M700 100 Q420 200 240 244" class="b-line" stroke-width="1.4" marker-end="url(#arr4)" />
+        <text x="500" y="200" text-anchor="middle" class="b-mono">complete</text>
+
+        <path d="M740 106 L460 244" class="b-line" stroke-width="1.4" marker-end="url(#arr4)" />
+        <text x="640" y="180" text-anchor="middle" class="b-mono">fail</text>
+
+        <!-- 取消可在 queued / dispatched / running 任一态触发 -->
+        <path d="M120 106 L160 244" class="b-line" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arr4)" />
+        <path d="M430 106 L630 244" class="b-line" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arr4)" />
+        <path d="M740 106 L720 244" class="b-line" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arr4)" />
+        <text x="660" y="160" class="b-muted">cancel(任一非终态)</text>
+
+        <!-- 自我恢复:reclaim -->
+        <path d="M520 60 Q460 0 360 30 Q300 60 340 70" class="b-line" stroke-width="1.2" marker-end="url(#arr4)" />
+        <text x="430" y="14" text-anchor="middle" class="b-mono">ReclaimStaleDispatched (90s)</text>
+
+        <!-- sweeper:queued / running 超时 -->
+        <path d="M120 106 L380 244" class="b-line" stroke-width="1.2" stroke-dasharray="2,3" marker-end="url(#arr4)" />
+        <path d="M430 106 L420 244" class="b-line" stroke-width="1.2" stroke-dasharray="2,3" marker-end="url(#arr4)" />
+        <path d="M760 106 L500 244" class="b-line" stroke-width="1.2" stroke-dasharray="2,3" marker-end="url(#arr4)" />
+        <text x="50" y="180" class="b-muted">sweeper 超时:queued&gt;2h(虚线 ⇣)</text>
+        <text x="50" y="196" class="b-muted">  dispatched&gt;5min · running&gt;2.5h</text>
+
+        <!-- 备注 -->
+        <text x="20" y="380" class="b-muted">实线 = 正常生命周期 · 长虚线 = 用户取消 · 短虚线 = sweeper 兜底失败</text>
+      </svg>
+      <figcaption>queued → dispatched → running → completed/failed,sweeper 与 cancel 是状态机的"安全网"</figcaption>
+    </figure>
+
+    <h4 class="sub">状态转换的关键事实</h4>
+    <table class="tbl">
+      <thead><tr><th>转换</th><th>谁触发</th><th>SQL / 代码</th><th>注意点</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill info">queued</span> → <span class="pill warn">dispatched</span></td><td>daemon /api/daemon/claim</td><td><code>ClaimAgentTask</code> + 单事务原子化</td><td>必受 <code>agent.max_concurrent_tasks</code> 约束</td></tr>
+        <tr><td><span class="pill warn">dispatched</span> → <span class="pill brand">running</span></td><td>daemon /api/daemon/{id}/start</td><td><code>StartAgentTask</code></td><td>广播 <code>task:running</code>,UI 30s staleTime 提前刷新</td></tr>
+        <tr><td><span class="pill brand">running</span> → <span class="pill ok">completed</span></td><td>daemon /api/daemon/{id}/complete</td><td><code>CompleteAgentTask</code> + <code>UpdateChatSessionSession</code> 同事务</td><td>chat task 必须 tx 一起写,避免下条消息读到旧 session</td></tr>
+        <tr><td><span class="pill brand">running</span> → <span class="pill err">failed</span></td><td>daemon /api/daemon/{id}/fail · sweeper</td><td><code>FailAgentTask</code></td><td>触发 <code>ReconcileAgentStatus</code></td></tr>
+        <tr><td><span class="pill warn">dispatched</span> → <span class="pill warn">dispatched</span> (reclaim)</td><td>下次 ClaimTaskForRuntime</td><td><code>ReclaimStaleDispatchedTaskForRuntime(90s)</code></td><td>窗口必须 ≥ daemon claim 30s + start 30s + 调度 slack</td></tr>
+        <tr><td>任一态 → <span class="pill">cancelled</span></td><td>用户 / RerunIssue / DeleteComment</td><td><code>CancelAgentTask</code> · <code>CancelAgentTasksByIssue</code> · <code>CancelAgentTasksByTriggerComment</code></td><td>必须 reconcile agent.status,否则 UI 卡在 working</td></tr>
+        <tr><td>queued&gt;2h 自动失败</td><td>sweeper</td><td><code>sweepExpiredQueuedTasks</code> · 每次 ≤ 500 行</td><td>排空历史 8w+ 离线 backlog 用</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">Claim 的两种路径</h4>
+    <p>
+      Daemon 既可以"按 agent claim"也可以"按 runtime claim",分别对应两个 service 方法:
+    </p>
+    <ul class="bul">
+      <li><strong>ClaimTask(agentID)</strong>:精确匹配 agent + 检查 <code>max_concurrent_tasks</code> + <code>ReconcileAgentStatus</code>。被外部 CLI 用得多。</li>
+      <li><strong>ClaimTaskForRuntime(runtimeID)</strong>:一台 daemon 上可能有多个 agent,这条路径会先 ReclaimStaleDispatched(回收 90s 内未确认的 dispatched 行),再 EmptyClaim 快速短路,再 <code>ListQueuedClaimCandidatesByRuntime</code> 选优,然后逐个 agent 调 ClaimTask。</li>
+    </ul>
+
+    <div class="callout">
+      <strong>"reclaim 90s"是 claim 与 start 之间网络丢包的安全窗口</strong>。daemon 调 <code>/claim</code> 拿到 task 后立刻 <code>/start</code>,
+      但如果 claim 响应丢失(daemon 没收到 200),它会再次 claim 同一台 runtime。此时同一行已经在 dispatched 状态;
+      ReclaimStaleDispatchedTaskForRuntime 会"回收"这一行,前提是它停留在 dispatched ≥ 90s——
+      这就是为什么常量定义文档明确写着"必须超过 daemon 客户端 timeout 30s+30s+slack"。
+    </div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ⑤ Realtime + DaemonWS + Redis Relay                        -->
+  <!-- ========================================================== -->
+  <section id="sec-realtime">
+    <h2>⑤ Realtime Hub + DaemonWS + Redis Relay — 双 WebSocket 通道</h2>
+    <p>
+      Multica 后端运行<strong>两个独立 WS Hub</strong>:面向浏览器的 <code>realtime.Hub</code> 与面向本地 daemon 的
+      <code>daemonws.Hub</code>。Redis Relay 仅服务于前者的多节点广播,后者通过 Relay 派生的
+      <code>RelayNotifier</code> 在跨节点定向唤醒 daemon。
+    </p>
+
+    <h4 class="sub">三层结构总览</h4>
+    <figure class="figure">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" role="img" aria-label="Realtime + DaemonWS + Redis Relay">
+        <defs>
+          <marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="b-arrow" />
+          </marker>
+        </defs>
+
+        <!-- 浏览器/Daemon -->
+        <rect x="20"  y="20" width="200" height="60" rx="6" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="120" y="44" text-anchor="middle" class="b-text">Browser · Desktop · Mobile</text>
+        <text x="120" y="62" text-anchor="middle" class="b-mono">/ws  (Cookie / PAT)</text>
+
+        <rect x="660" y="20" width="200" height="60" rx="6" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="760" y="44" text-anchor="middle" class="b-text">Local Daemon</text>
+        <text x="760" y="62" text-anchor="middle" class="b-mono">/api/daemon/ws  (Daemon Token)</text>
+
+        <!-- 节点 A -->
+        <rect x="20"  y="120" width="400" height="220" rx="10" class="b-stroke" fill="none" stroke-width="1" />
+        <text x="220" y="140" text-anchor="middle" class="b-text" style="font-weight:500">API Node A</text>
+
+        <rect x="40" y="160" width="180" height="80" rx="6" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="130" y="182" text-anchor="middle" class="b-text">realtime.Hub</text>
+        <text x="130" y="200" text-anchor="middle" class="b-muted">rooms: scopeKey → clients</text>
+        <text x="130" y="216" text-anchor="middle" class="b-muted">onFirst / onLast 触发 relay</text>
+        <text x="130" y="232" text-anchor="middle" class="b-muted">Client.seenIDs 滑窗去重</text>
+
+        <rect x="240" y="160" width="160" height="80" rx="6" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="320" y="182" text-anchor="middle" class="b-text">daemonws.Hub</text>
+        <text x="320" y="200" text-anchor="middle" class="b-muted">byRuntime 索引</text>
+        <text x="320" y="216" text-anchor="middle" class="b-muted">Heartbeat 入口</text>
+        <text x="320" y="232" text-anchor="middle" class="b-muted">CheckOrigin = always true</text>
+
+        <rect x="40" y="260" width="360" height="60" rx="6" class="b-brand b-stroke" stroke-width="1.2" />
+        <text x="220" y="284" text-anchor="middle" class="b-text">DualWriteBroadcaster</text>
+        <text x="220" y="302" text-anchor="middle" class="b-muted">本地 hub.BroadcastToScope + relay.Publish (异步)</text>
+
+        <!-- 节点 B -->
+        <rect x="460" y="120" width="400" height="220" rx="10" class="b-stroke" fill="none" stroke-width="1" />
+        <text x="660" y="140" text-anchor="middle" class="b-text" style="font-weight:500">API Node B</text>
+
+        <rect x="480" y="160" width="180" height="80" rx="6" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="570" y="182" text-anchor="middle" class="b-text">realtime.Hub</text>
+        <text x="570" y="200" text-anchor="middle" class="b-muted">仅订阅 N 房间 → 仅消费 N 个分片</text>
+
+        <rect x="680" y="160" width="160" height="80" rx="6" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="760" y="182" text-anchor="middle" class="b-text">daemonws.Hub</text>
+        <text x="760" y="200" text-anchor="middle" class="b-muted">收到 RelayNotifier 才唤醒</text>
+
+        <rect x="480" y="260" width="360" height="60" rx="6" class="b-brand b-stroke" stroke-width="1.2" />
+        <text x="660" y="284" text-anchor="middle" class="b-text">DualWriteBroadcaster</text>
+
+        <!-- Redis -->
+        <rect x="240" y="370" width="400" height="70" rx="8" class="b-err b-stroke" stroke-width="1.5" />
+        <text x="440" y="394" text-anchor="middle" class="b-text" style="font-weight:500">Redis Streams · ShardedStreamRelay</text>
+        <text x="440" y="412" text-anchor="middle" class="b-muted">N 个分片(默认) · 每节点 XREADGROUP 仅消费"自己有订阅"的房间所在分片</text>
+        <text x="440" y="430" text-anchor="middle" class="b-muted">+ daemon-runtime 专用通道(SetDaemonRuntimeDeliverer)</text>
+
+        <!-- 连线 -->
+        <path d="M120 80 L130 160" class="b-line" stroke-width="1.2" marker-end="url(#arr5)" />
+        <path d="M760 80 L760 160" class="b-line" stroke-width="1.2" marker-end="url(#arr5)" />
+
+        <path d="M220 320 L380 370" class="b-line" stroke-width="1.2" marker-end="url(#arr5)" />
+        <path d="M380 370 L220 320" class="b-line" stroke-width="1.2" marker-end="url(#arr5)" />
+        <path d="M660 320 L500 370" class="b-line" stroke-width="1.2" marker-end="url(#arr5)" />
+        <path d="M500 370 L660 320" class="b-line" stroke-width="1.2" marker-end="url(#arr5)" />
+
+        <path d="M400 200 L480 200" class="b-line" stroke-width="0.8" stroke-dasharray="3,3" />
+        <text x="440" y="194" text-anchor="middle" class="b-muted">独立连接池</text>
+      </svg>
+      <figcaption>每个 API 节点本地有 hub + daemonHub + dual-write broadcaster;Redis 仅作 fanout,daemon 唤醒走专用 stream</figcaption>
+    </figure>
+
+    <h4 class="sub">三种 Relay 模式如何选</h4>
+    <table class="tbl">
+      <thead><tr><th>REALTIME_RELAY_MODE</th><th>组件</th><th>适用场景</th></tr></thead>
+      <tbody>
+        <tr><td class="lbl">sharded(默认)</td><td>ShardedStreamRelay 唯一 reader,内置 daemon-runtime 通道</td><td>新部署、横向扩缩容、多节点</td></tr>
+        <tr><td class="lbl">dual</td><td>MirroredRelay = sharded + legacy 双写,sharded 才驱动 daemon 唤醒</td><td>从 legacy 平滑迁移期</td></tr>
+        <tr><td class="lbl">legacy</td><td>RedisRelay(单 stream),无 daemon-runtime 通道,daemon 唤醒退化为本地 hub</td><td>历史兼容 / 单节点回滚</td></tr>
+        <tr><td class="lbl">未设 REDIS_URL</td><td>broadcaster = hub 本身</td><td>开发模式 / 单节点</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">scope-room 与 onFirst/onLast 边界</h4>
+    <p>
+      <code>realtime.Hub</code> 的房间 key 是 <code>{Type, ID}</code>(如 <code>{workspace, ws-uuid}</code>、
+      <code>{task, task-uuid}</code>、<code>{chat, session-uuid}</code>、<code>{user, user-uuid}</code>)。
+      只要某 scope <strong>从 0 个订阅者变到 1 个</strong>,Hub 触发 <code>onFirstSubscriber</code>,
+      ShardedStreamRelay 才启动该分片的 <code>XREADGROUP</code> 循环;反之降到 0 时
+      <code>onLastSubscriber</code> 停掉循环。这避免一台 API 节点白白消费所有分片消息。
+    </p>
+
+    <h4 class="sub">两个 Hub 的差异要点</h4>
+    <table class="tbl">
+      <thead><tr><th>维度</th><th>realtime.Hub(浏览器)</th><th>daemonws.Hub(daemon)</th></tr></thead>
+      <tbody>
+        <tr><td>身份</td><td>userID + workspaceID(JWT/PAT 鉴权)</td><td>DaemonID + UserID + WorkspaceID + RuntimeIDs(DaemonAuth 鉴权)</td></tr>
+        <tr><td>路由维度</td><td><code>rooms[scopeKey]</code></td><td><code>byRuntime[runtimeID]</code></td></tr>
+        <tr><td>跨域</td><td>受 origin allowlist 控制(atomic.Value 共享)</td><td>恒为 true(Authorization 头鉴权,无 cookie CSRF 风险)</td></tr>
+        <tr><td>去重</td><td>Client.seenIDs 滑窗 128 — dual-write 防止 local + redis 双写重复</td><td>不需要(单一来源)</td></tr>
+        <tr><td>心跳</td><td>WS ping/pong</td><td>HeartbeatHandler(后置注入,刷 runtime 心跳)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <strong>RelayNotifier 是 daemon 跨节点唤醒的关键</strong>。Node A 上发生 enqueue,但 daemon 通过 WS 连在 Node B,
+      此时 Node A 的 <code>daemonHub</code> 并不持有 daemon 句柄;<code>NotifyTaskAvailable</code> 会被
+      <code>RelayNotifier</code> 包成一帧扔进 <code>daemon-runtime</code> stream,
+      Node B 上的 <code>SetDaemonRuntimeDeliverer(daemonHub)</code> 拣回这帧并通过本地 byRuntime 索引转发给该 daemon。
+      这是 sharded 模式下 daemon 唤醒能"跨节点"工作的根本原因。
+    </div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ⑥ Events Bus                                               -->
+  <!-- ========================================================== -->
+  <section id="sec-events">
+    <h2>⑥ Events Bus 与三类监听器 — 业务态 → WS / Activity / Inbox 的统一中枢</h2>
+    <p>
+      <a href="file:///d:/workdir/mu/multica/server/internal/events/bus.go">events/bus.go</a>
+      是一个<strong>同步的进程内 pub/sub</strong>。所有 handler 与 service 在写入 DB 后调用
+      <code>bus.Publish()</code>,再由 main 启动时注册的三组 listener 把事件分发到 WS、activity 表与 inbox 表。
+    </p>
+
+    <h4 class="sub">Bus 的核心特性</h4>
+    <ul class="bul">
+      <li><strong>同步</strong>:Publish 在调用方 goroutine 顺序执行所有 handler,无 channel、无重入。</li>
+      <li><strong>类型路由 + 全局监听</strong>:<code>Subscribe(type, h)</code> 只收特定 event,<code>SubscribeAll(h)</code> 收全部。类型 handler 总是先于全局 handler 执行。</li>
+      <li><strong>Panic 隔离</strong>:每个 handler 单独 <code>defer recover</code>,一个失败的 listener 不会拖垮其它。</li>
+      <li><strong>Event 字段</strong>:<code>Type · WorkspaceID · ActorType · ActorID · Payload</code> + 可选 <code>TaskID / ChatSessionID</code>(用作"提示路由到哪个 scope-room",listener 不必再反序列化 payload)。</li>
+    </ul>
+
+    <h4 class="sub">三组 listener 的注册顺序</h4>
+    <figure class="figure">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 220" width="880" height="220" role="img" aria-label="Listener registration order">
+        <defs>
+          <marker id="arr6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="b-arrow" />
+          </marker>
+        </defs>
+
+        <rect x="20"  y="40" width="200" height="80" rx="8" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="120" y="64" text-anchor="middle" class="b-text" style="font-weight:500">registerListeners</text>
+        <text x="120" y="84" text-anchor="middle" class="b-mono">listeners.go (WS 广播)</text>
+        <text x="120" y="102" text-anchor="middle" class="b-muted">含 inbox / invitation 的"个人 fanout"</text>
+
+        <rect x="240" y="40" width="200" height="80" rx="8" class="b-brand b-stroke" stroke-width="1.2" />
+        <text x="340" y="64" text-anchor="middle" class="b-text" style="font-weight:500">registerSubscriberListeners</text>
+        <text x="340" y="84" text-anchor="middle" class="b-mono">subscriber_listeners.go</text>
+        <text x="340" y="102" text-anchor="middle" class="b-muted">维护 issue/agent 订阅关系表</text>
+
+        <rect x="460" y="40" width="200" height="80" rx="8" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="560" y="64" text-anchor="middle" class="b-text" style="font-weight:500">registerActivityListeners</text>
+        <text x="560" y="84" text-anchor="middle" class="b-mono">activity_listeners.go</text>
+        <text x="560" y="102" text-anchor="middle" class="b-muted">写 issue_activities timeline</text>
+
+        <rect x="680" y="40" width="200" height="80" rx="8" class="b-ok b-stroke" stroke-width="1.2" />
+        <text x="780" y="64" text-anchor="middle" class="b-text" style="font-weight:500">registerNotificationListeners</text>
+        <text x="780" y="84" text-anchor="middle" class="b-mono">notification_listeners.go</text>
+        <text x="780" y="102" text-anchor="middle" class="b-muted">写 inbox_items + 触发邮件</text>
+
+        <path d="M220 80 L240 80" class="b-line" stroke-width="1.2" marker-end="url(#arr6)" />
+        <path d="M440 80 L460 80" class="b-line" stroke-width="1.2" marker-end="url(#arr6)" />
+        <path d="M660 80 L680 80" class="b-line" stroke-width="1.2" marker-end="url(#arr6)" />
+
+        <text x="20"  y="170" class="b-muted">注册顺序的硬约束:notification 监听器读 subscribers 表,所以 <strong>subscriber 必须先注册</strong>。</text>
+        <text x="20"  y="188" class="b-muted">由于 Bus 同步执行,handler 注册顺序 = 同一事件的处理顺序,这一点不能换。</text>
+      </svg>
+      <figcaption>顺序敏感:WS → subscriber → activity → notification(notification 依赖 subscriber 已写入)</figcaption>
+    </figure>
+
+    <h4 class="sub">典型事件名 → 后果链</h4>
+    <table class="tbl">
+      <thead><tr><th>Event</th><th>WS 广播</th><th>Subscriber</th><th>Activity</th><th>Notification</th></tr></thead>
+      <tbody>
+        <tr><td class="lbl">issue:created</td><td>workspace 房间</td><td>设置 reporter / assignee 订阅</td><td>+ issue_activity (created)</td><td>给 assignee / mentions 发 inbox</td></tr>
+        <tr><td class="lbl">comment:created</td><td>issue 房间</td><td>commenter 自动订阅</td><td>+ activity</td><td>@mentions / subscribers</td></tr>
+        <tr><td class="lbl">task:queued / running / completed</td><td>workspace + task 房间</td><td>—</td><td>—</td><td>仅 completed/failed 入 inbox</td></tr>
+        <tr><td class="lbl">autopilot:run:start / fail</td><td>workspace</td><td>—</td><td>—</td><td>fail → 邮件 + inbox 通知 owner</td></tr>
+        <tr><td class="lbl">inbox:new</td><td>SendToUser(recipient)</td><td>—</td><td>—</td><td>—</td></tr>
+        <tr><td class="lbl">invitation:created</td><td>SendToUser(invitee)</td><td>—</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>"WS payload 与 event payload 同形"</strong>是个有意的设计:<code>Event.Payload</code> 直接 <code>json.Marshal</code> 后就能扔进 WS 帧。
+      这样 listener 不需要再做翻译,也方便后续把单进程 Bus 替换成异步队列时 payload 不变。
+    </div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ⑦ 后台 goroutine                                            -->
+  <!-- ========================================================== -->
+  <section id="sec-bg">
+    <h2>⑦ 后台 goroutine 矩阵 — 五条无人值守的常驻例程</h2>
+    <p>
+      除了 HTTP / WS 这种"被请求驱动"的代码路径外,server 进程还运行五条常驻 goroutine。每一条都有自己的<strong>触发周期、依赖资源和取消上下文</strong>。
+    </p>
+
+    <table class="tbl">
+      <thead><tr><th>goroutine</th><th>周期</th><th>取消 ctx</th><th>主要职责</th><th>关键阈值</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="k">runRuntimeSweeper</td>
+          <td>30s</td>
+          <td>sweepCtx</td>
+          <td>① 标 stale 在线 runtime 为 offline · ② 失败 dispatched 超 5min / running 超 2.5h 的 task · ③ 失败 queued 超 2h 的 task(每次 ≤500 行) · ④ GC offline >7d 且无 agent 的 runtime</td>
+          <td>staleThreshold=150s · runningTimeout=2.5h · queuedTTL=2h</td>
+        </tr>
+        <tr>
+          <td class="k">heartbeatScheduler.Run</td>
+          <td>30s 批量 flush</td>
+          <td>sweepCtx</td>
+          <td>合并 daemon 心跳的 DB 写入,避免热路径上每个心跳触发 UPDATE。Stop 在 srv.Shutdown 之后调用,保证最后一批被刷出</td>
+          <td>FlushInterval=30s · DBFlushInterval=60s</td>
+        </tr>
+        <tr>
+          <td class="k">runAutopilotScheduler</td>
+          <td>30s</td>
+          <td>autopilotCtx</td>
+          <td>① 启动时 RecoverLostTriggers(NULL next_run_at) · ② tick 时 ClaimDueScheduleTriggers(SKIP LOCKED) · ③ 调用 DispatchAutopilot · ④ AdvanceTriggerNextRun</td>
+          <td>schedulerInterval=30s</td>
+        </tr>
+        <tr>
+          <td class="k">runAutopilotFailureMonitor</td>
+          <td>由 envFailureMonitorConfig 决定</td>
+          <td>autopilotCtx</td>
+          <td>检测连续失败的 autopilot,触发"自动暂停"并通知 owner</td>
+          <td>窗口 / 阈值由 env 配置</td>
+        </tr>
+        <tr>
+          <td class="k">runDBStatsLogger</td>
+          <td>定期</td>
+          <td>sweepCtx</td>
+          <td>把 pgxpool 的 stats(open / idle / acquired)结构化日志输出,便于压测期排查</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">为什么把"取消上下文"分成 sweepCtx / autopilotCtx 两组?</h4>
+    <p>
+      关闭顺序里(参见⑨)<strong>autopilotCtx 在收到 SIGINT 时立刻取消</strong>,但 sweepCtx 必须等 srv.Shutdown 完成之后才取消。
+      原因:autopilot 调度可以立即停掉,反正下次启动会 RecoverLostTriggers;但 heartbeatScheduler 必须在所有 daemon 心跳 handler 都返回之后才能 Stop,
+      否则会丢掉最后 30s 的批量。把这两个生命周期拆开,关闭顺序就清晰且可证明正确。
+    </p>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ⑧ DB 访问层                                                 -->
+  <!-- ========================================================== -->
+  <section id="sec-db">
+    <h2>⑧ DB 访问层 — sqlc 生成 + pgx 连接池 + tx 包装</h2>
+    <p>
+      Multica 不用 ORM,所有 SQL 写在 <code>server/sql/</code> 下,由 <strong>sqlc</strong> 编译为
+      <code>server/pkg/db/generated/</code> 的强类型 Go 函数。这一节解释 sqlc → Queries → pgxpool 的依赖关系
+      以及"事务封装"的统一写法。
+    </p>
+
+    <h4 class="sub">分层关系</h4>
+    <table class="tbl">
+      <thead><tr><th>层</th><th>位置</th><th>职责</th></tr></thead>
+      <tbody>
+        <tr><td>SQL 源</td><td><code>server/sql/queries/*.sql</code></td><td>每个 endpoint 一段命名 SQL,带 sqlc 注释 <code>-- name: GetIssue :one</code></td></tr>
+        <tr><td>迁移</td><td><code>server/sql/migrations/*.{up,down}.sql</code></td><td>双向迁移,80+ 个文件,migrations.go 内嵌入</td></tr>
+        <tr><td>生成代码</td><td><code>server/pkg/db/generated/*.go</code></td><td>sqlc 产出 <code>Queries</code> 结构体 + 强类型 model + 参数 struct</td></tr>
+        <tr><td>底层驱动</td><td>pgx/v5 + pgxpool</td><td>连接池 · pgtype.UUID/Text/Timestamptz · 原生 prepared statements</td></tr>
+        <tr><td>事务封装</td><td><code>service.runInTx</code></td><td>给 service 提供 <code>(qtx *db.Queries) error</code> 闭包接口</td></tr>
+      </tbody>
+    </table>
+
+    <h4 class="sub">事务用法范式</h4>
+    <pre><span class="c">// service/task.go · CompleteTask 节选:多个 DB 调用必须原子化</span>
+<span class="k">if</span> err := s.runInTx(ctx, <span class="k">func</span>(qtx *db.Queries) error {
+    t, err := qtx.CompleteAgentTask(ctx, ...)
+    <span class="k">if</span> err != nil { <span class="k">return</span> err }
+
+    <span class="k">if</span> t.ChatSessionID.Valid {
+        <span class="c">// 同事务内更新 chat_session 的 resume 指针,</span>
+        <span class="c">// 避免下条消息读到旧 session_id 引发"重新加载历史"</span>
+        <span class="k">return</span> qtx.UpdateChatSessionSession(ctx, ...)
+    }
+    <span class="k">return</span> nil
+}); err != nil {
+    <span class="k">return</span> nil, err
+}</pre>
+
+    <h4 class="sub">连接池调优</h4>
+    <ul class="bul">
+      <li><code>newDBPool(DATABASE_URL)</code> 内部按 env 解析 <code>POOL_MAX_CONNS / POOL_MIN_CONNS / POOL_MAX_CONN_LIFETIME</code> 等;启动时 <code>logPoolConfig</code> 打日志便于排查。</li>
+      <li><code>runDBStatsLogger</code> 周期记录运行时统计:<code>open · idle · acquired · max</code>。</li>
+      <li>大批量后台 SQL(sweeper)显式分页(<code>queuedExpireBatchSize=500</code>)避免 long tx。</li>
+    </ul>
+
+    <div class="callout">
+      <strong>三套独立的 Redis 客户端</strong>:store(应用层缓存)/ realtime-write / realtime-read,在 main.go 用
+      <code>newNamedRedisClient</code> 分别构造,确保 BLOCKING 的 XREADGROUP 不会阻塞请求路径上的普通 Redis 操作。
+      关闭顺序也按这个反向逐个 close。
+    </div>
+  </section>
+
+  <!-- ========================================================== -->
+  <!-- ⑨ 优雅关闭                                                  -->
+  <!-- ========================================================== -->
+  <section id="sec-shutdown">
+    <h2>⑨ 优雅关闭顺序 — 为什么 sweeper 要"晚于" srv.Shutdown 才能停</h2>
+    <p>
+      关闭顺序是 main.go 中最讲究的一段。一个错位就会导致<strong>心跳数据丢失、运行中 task 被误判失败</strong>。
+    </p>
+
+    <figure class="figure">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 360" width="880" height="360" role="img" aria-label="Graceful shutdown order">
+        <defs>
+          <marker id="arr7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="b-arrow" />
+          </marker>
+        </defs>
+
+        <rect x="20" y="20" width="200" height="44" rx="6" class="b-err b-stroke" stroke-width="1.2" />
+        <text x="120" y="40" text-anchor="middle" class="b-text">SIGINT / SIGTERM</text>
+        <text x="120" y="56" text-anchor="middle" class="b-muted">signal.Notify(quit)</text>
+
+        <rect x="260" y="20" width="200" height="44" rx="6" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="360" y="40" text-anchor="middle" class="b-text">autopilotCancel()</text>
+        <text x="360" y="56" text-anchor="middle" class="b-muted">立即停 scheduler / failure monitor</text>
+
+        <rect x="500" y="20" width="200" height="44" rx="6" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="600" y="40" text-anchor="middle" class="b-text">srv.Shutdown(10s)</text>
+        <text x="600" y="56" text-anchor="middle" class="b-muted">等待所有 in-flight HTTP</text>
+
+        <rect x="740" y="20" width="120" height="44" rx="6" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="800" y="40" text-anchor="middle" class="b-text">↓ 完成</text>
+
+        <!-- 第二行 -->
+        <rect x="20" y="100" width="200" height="44" rx="6" class="b-warn b-stroke" stroke-width="1.2" />
+        <text x="120" y="120" text-anchor="middle" class="b-text">sweepCancel()</text>
+        <text x="120" y="136" text-anchor="middle" class="b-muted">停 sweeper / dbstats</text>
+
+        <rect x="260" y="100" width="280" height="44" rx="6" class="b-brand b-stroke" stroke-width="1.5" />
+        <text x="400" y="120" text-anchor="middle" class="b-text" style="font-weight:500">heartbeatScheduler.Stop()</text>
+        <text x="400" y="136" text-anchor="middle" class="b-muted">flush 最后一批心跳到 DB</text>
+
+        <rect x="580" y="100" width="280" height="44" rx="6" class="b-info b-stroke" stroke-width="1.2" />
+        <text x="720" y="120" text-anchor="middle" class="b-text">metricsServer.Shutdown(3s)</text>
+        <text x="720" y="136" text-anchor="middle" class="b-muted">prometheus 指标拉取窗口</text>
+
+        <!-- 第三行 -->
+        <rect x="20" y="180" width="840" height="44" rx="6" class="b-dim b-stroke" stroke-width="1.2" />
+        <text x="440" y="206" text-anchor="middle" class="b-text">(defer) relay.Stop · relayCancel · relay.Wait · close redis clients · close pgxpool · analytics.Close</text>
+
+        <!-- 箭头 -->
+        <path d="M220 42 L260 42" class="b-line" stroke-width="1.2" marker-end="url(#arr7)" />
+        <path d="M460 42 L500 42" class="b-line" stroke-width="1.2" marker-end="url(#arr7)" />
+        <path d="M700 42 L740 42" class="b-line" stroke-width="1.2" marker-end="url(#arr7)" />
+        <path d="M800 64 L800 80 L120 80 L120 100" class="b-line" stroke-width="1.2" marker-end="url(#arr7)" />
+        <path d="M220 122 L260 122" class="b-line" stroke-width="1.2" marker-end="url(#arr7)" />
+        <path d="M540 122 L580 122" class="b-line" stroke-width="1.2" marker-end="url(#arr7)" />
+        <path d="M440 144 L440 180" class="b-line" stroke-width="1.2" marker-end="url(#arr7)" />
+
+        <!-- 注脚 -->
+        <text x="20" y="270" class="b-muted">关键不变量:</text>
+        <text x="40" y="290" class="b-muted">1. autopilot 立即停掉 — 调度类工作可在下次启动时通过 RecoverLostTriggers 恢复。</text>
+        <text x="40" y="308" class="b-muted">2. HTTP 必须在 sweeper 之前停 — 否则正在处理的心跳 handler 来不及把 ID 入 batch 就被 Stop() 抛弃。</text>
+        <text x="40" y="326" class="b-muted">3. heartbeat.Stop 必须在 srv.Shutdown 之后 — Stop 内部 flush 一次,这是唯一一次最终 flush。</text>
+        <text x="40" y="344" class="b-muted">4. relay / redis / pool 的 close 用 defer 收尾,顺序由 defer 栈反向保证。</text>
+      </svg>
+      <figcaption>关闭顺序:autopilot → HTTP → sweeper / heartbeat → metrics → relay / redis / pool</figcaption>
+    </figure>
+
+    <h4 class="sub">为什么是这个顺序?</h4>
+    <table class="tbl">
+      <thead><tr><th>步骤</th><th>不能放更前是因为</th><th>不能放更后是因为</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>autopilotCancel</td>
+          <td>—(可以最早)</td>
+          <td>不放最前会让 scheduler 在 HTTP 关停期间继续 dispatch,产生"已经在退出却还在写 DB"的 race</td>
+        </tr>
+        <tr>
+          <td>srv.Shutdown</td>
+          <td>autopilot 必须先停,否则 daemon /heartbeat 路径会把 sweeper 即将清理的 runtime 的 last_seen_at 又刷新</td>
+          <td>晚于 sweepCancel 会导致 heartbeat handler 在 sweeper 死后还在调 Schedule,但其实没人 flush</td>
+        </tr>
+        <tr>
+          <td>sweepCancel</td>
+          <td>HTTP 必须先全部退出,确保此时不再有人写 batch</td>
+          <td>晚于 heartbeat.Stop 会让 sweeper 多跑一轮,标错"还活着的"runtime 为 offline</td>
+        </tr>
+        <tr>
+          <td>heartbeatScheduler.Stop</td>
+          <td>必须在 sweepCancel 之后(同一 ctx),让最后一批 ID 被收齐</td>
+          <td>必须在退出主函数前,否则 60s 心跳数据进不了 DB</td>
+        </tr>
+        <tr>
+          <td>metricsServer.Shutdown</td>
+          <td>必须晚于业务 HTTP,留出最后 3s 给监控系统拉走最新指标</td>
+          <td>必须在进程退出前(否则没人触发优雅关闭)</td>
+        </tr>
+        <tr>
+          <td>relay / redis / pool close</td>
+          <td>—(defer 自然在最后)</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <strong>误关一个会怎样</strong>:① 如果先 sweepCancel 再 srv.Shutdown,heartbeat handler 会调用一个已经停掉的 scheduler 的 Schedule(),
+      ID 进不了任何缓冲区。② 如果忘了在 srv.Shutdown 后 Stop heartbeat,最后 30s 的心跳全部丢失,sweeper 在下次启动后会把"看上去 90s 没心跳"的 runtime 错判为离线。
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

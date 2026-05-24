@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>07 · AuthStore · Multica 深度解析</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb">
+    <a href="../overview.html">项目速览</a> <span>›</span>
+    <a href="index.html">关键模块深度解析</a> <span>›</span>
+    <span>07 · AuthStore</span>
+  </div>
+
+  <div class="title-block">
+    <h1>AuthStore · 双模式认证的状态机</h1>
+    <div class="path">packages/core/auth/store.ts</div>
+    <p class="lede">
+      Multica 不能"二选一"地支持 Web cookie 或 Desktop token —— 它必须同时跑通。
+      AuthStore 用一个开关 <code>cookieAuth</code> 让<strong>同一份逻辑</strong>覆盖两种模式,并在登出时严格清理工作区单例,避免上一账号的数据闪现给新账号。
+    </p>
+  </div>
+
+  <section>
+    <h2>状态结构</h2>
+    <pre>type AuthState = {
+  user: User | null;
+  isLoading: boolean;
+  <span class="c">// actions</span>
+  bootstrap: () =&gt; Promise&lt;void&gt;;
+  sendCode: (email: string) =&gt; Promise&lt;void&gt;;
+  verifyCode: (email: string, code: string) =&gt; Promise&lt;User&gt;;
+  loginWithGoogle: (code: string, redirectUri: string) =&gt; Promise&lt;User&gt;;
+  loginWithToken: (token: string) =&gt; Promise&lt;User&gt;;  <span class="c">// 仅 desktop deeplink 用</span>
+  logout: () =&gt; void;
+  setUser: (u: User) =&gt; void;
+  refreshMe: () =&gt; Promise&lt;void&gt;;
+}</pre>
+  </section>
+
+  <section>
+    <h2>双模式判定</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="12">
+        <defs>
+          <marker id="ar10" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+        </defs>
+
+        <rect x="320" y="20" width="240" height="50" rx="10" fill="#6366f1" />
+        <text x="440" y="42" fill="#fff" text-anchor="middle" font-weight="600">verifyCode(email, code)</text>
+        <text x="440" y="58" fill="#fff" text-anchor="middle" font-size="10">api.verifyCode → { token, user }</text>
+
+        <line x1="380" y1="70" x2="200" y2="120" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar10)" />
+        <text x="280" y="100" class="svg-text-muted" text-anchor="middle" font-size="10">cookieAuth = true (Web)</text>
+
+        <line x1="500" y1="70" x2="680" y2="120" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar10)" />
+        <text x="600" y="100" class="svg-text-muted" text-anchor="middle" font-size="10">cookieAuth = false (Desktop)</text>
+
+        <rect x="20" y="125" width="360" height="100" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#10b981" />
+        <text x="200" y="148" class="svg-text" text-anchor="middle" font-weight="600">不持久化 token</text>
+        <text x="200" y="170" class="svg-text-muted" text-anchor="middle" font-size="11">服务器在响应头种了 HttpOnly cookie</text>
+        <text x="200" y="188" class="svg-text-muted" text-anchor="middle" font-size="11">浏览器自动带上,XSS 不可读</text>
+        <text x="200" y="206" class="svg-text-muted" text-anchor="middle" font-size="11">存储仅写 user · 重启后再读 cookie</text>
+
+        <rect x="500" y="125" width="360" height="100" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#3b82f6" />
+        <text x="680" y="148" class="svg-text" text-anchor="middle" font-weight="600">持久化 token</text>
+        <text x="680" y="170" class="svg-text-muted" text-anchor="middle" font-size="11">storage.setItem("multica_token", t)</text>
+        <text x="680" y="188" class="svg-text-muted" text-anchor="middle" font-size="11">api.setToken(t) → Authorization 头</text>
+        <text x="680" y="206" class="svg-text-muted" text-anchor="middle" font-size="11">deeplink 登录: loginWithToken</text>
+
+        <!-- 共同副作用 -->
+        <rect x="240" y="245" width="400" height="60" rx="10" class="svg-fill-surface-2" stroke-width="1" stroke="#a1a1aa" />
+        <text x="440" y="268" class="svg-text" text-anchor="middle" font-weight="600">两种模式共享的副作用</text>
+        <text x="440" y="285" class="svg-text-muted" text-anchor="middle" font-size="11">onLogin?() · identifyAnalytics(user) · set({ user })</text>
+        <text x="440" y="299" class="svg-text-muted" text-anchor="middle" font-size="11">WSProvider 在 user 变化时建立连接</text>
+
+        <line x1="200" y1="225" x2="380" y2="245" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar10)" />
+        <line x1="680" y1="225" x2="500" y2="245" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar10)" />
+      </svg>
+      <figcaption>图 7.1 · cookieAuth 决定 token 存储路径,但 user/analytics/WS 三件副作用始终一致</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>logout 的清理顺序(必须严格按此顺序)</h2>
+    <pre>logout: () =&gt; {
+  if (cookieAuth) {
+    api.logout().catch(() =&gt; {});      <span class="c">// ① 让服务器清 HttpOnly cookie</span>
+  }
+  storage.removeItem(<span class="s">"multica_token"</span>);   <span class="c">// ② 清本地 token (token 模式)</span>
+  api.setToken(<span class="k">null</span>);                  <span class="c">// ③ ApiClient 之后请求不带 Authorization</span>
+  setCurrentWorkspace(<span class="k">null</span>, <span class="k">null</span>);       <span class="c">// ④ 清空工作区单例 (见 05)</span>
+  resetAnalytics();                     <span class="c">// ⑤ 清埋点用户身份</span>
+  onLogout?.();                         <span class="c">// ⑥ app 层钩子 (跳路由 / 关 daemon token)</span>
+  set({ user: <span class="k">null</span> });                  <span class="c">// ⑦ 最后翻 store,触发 React 卸载受保护页面</span>
+}</pre>
+    <div class="callout warn">
+      <p class="callout-title">为什么是这个顺序</p>
+      <p class="callout-body">
+        ④ 必须在 ⑦ 之前 —— 如果先 set({ user: null }) 触发 React 卸载,而 setCurrentWorkspace 还没清,某些尚未卸载的组件会用旧 wsId 发出最后一次 query,响应的数据会被装到一个"未登录"的 cache key 里,下次登录如果不刷页就可能闪出陌生数据。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>bootstrap:启动时如何"自我恢复"</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 880 240" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="12">
+        <defs>
+          <marker id="ar11" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+        </defs>
+        <rect x="20" y="20" width="200" height="50" rx="10" fill="#6366f1" />
+        <text x="120" y="42" fill="#fff" text-anchor="middle" font-weight="600">App mount</text>
+        <text x="120" y="58" fill="#fff" text-anchor="middle" font-size="10">setLoading(true)</text>
+
+        <rect x="280" y="20" width="240" height="50" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#3b82f6" />
+        <text x="400" y="42" class="svg-text" text-anchor="middle" font-weight="600">cookieAuth?</text>
+
+        <line x1="220" y1="45" x2="280" y2="45" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar11)" />
+
+        <rect x="580" y="20" width="280" height="50" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#10b981" />
+        <text x="720" y="42" class="svg-text" text-anchor="middle">api.getMe()</text>
+        <text x="720" y="58" class="svg-text-muted" text-anchor="middle" font-size="10">浏览器自动带 cookie</text>
+
+        <line x1="520" y1="45" x2="580" y2="45" stroke="#10b981" stroke-width="1" marker-end="url(#ar11)" />
+
+        <rect x="280" y="100" width="240" height="50" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#f59e0b" />
+        <text x="400" y="122" class="svg-text" text-anchor="middle">storage.getItem("token")</text>
+
+        <line x1="400" y1="70" x2="400" y2="100" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar11)" />
+        <text x="430" y="90" class="svg-text-muted" font-size="10">false</text>
+
+        <rect x="580" y="100" width="280" height="50" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#10b981" />
+        <text x="720" y="122" class="svg-text" text-anchor="middle">api.setToken + getMe()</text>
+        <line x1="520" y1="125" x2="580" y2="125" stroke="#10b981" stroke-width="1" marker-end="url(#ar11)" />
+
+        <rect x="280" y="180" width="240" height="50" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#ef4444" />
+        <text x="400" y="202" class="svg-text" text-anchor="middle">401 / 403</text>
+        <text x="400" y="218" class="svg-text-muted" text-anchor="middle" font-size="10">setUser(null) · 不抛错</text>
+
+        <line x1="720" y1="155" x2="520" y2="195" stroke="#ef4444" stroke-width="1" marker-end="url(#ar11)" />
+        <text x="660" y="180" class="svg-text-muted" font-size="10">cookie/token 失效</text>
+
+        <line x1="720" y1="155" x2="720" y2="190" stroke="#10b981" stroke-width="1" stroke-dasharray="3 3" />
+        <text x="730" y="200" class="svg-text-muted" font-size="10">setLoading(false) → 渲染 app</text>
+      </svg>
+      <figcaption>图 7.2 · bootstrap 用一次 getMe 完成"是否登录"的判定,失败静默,不打扰用户</figcaption>
+    </figure>
+    <p class="muted">关键设计:bootstrap <strong>从不显示错误</strong>,失败就当作"未登录"。这样即使后端短暂 5xx,刷新两次后用户也能继续使用本地缓存(对 Electron 离线尤为重要)。</p>
+  </section>
+
+  <section>
+    <h2>跨 store 的反向依赖</h2>
+    <p>AuthStore 是为数不多直接 import <code>setCurrentWorkspace</code> 的 store。这种"高层依赖底层"的反向链,只允许出现在以下三处:</p>
+    <ul>
+      <li><strong>AuthStore.logout</strong> → 清工作区单例</li>
+      <li><strong>workspace store.setCurrent</strong> → 调 setCurrentWorkspace</li>
+      <li><strong>AuthBootstrap</strong>(CoreProvider 内的 effect) → 启动时联动两个 store</li>
+    </ul>
+    <p class="muted">其它任何 store / hook 都通过 <code>useSyncExternalStore(subscribeToCurrentWsId, getCurrentWsId)</code> 只读访问。</p>
+  </section>
+
+  <div class="callout ok">
+    <p class="callout-title">阅读全部 7 篇后,你已经掌握:</p>
+    <p class="callout-body">
+      • HTTP 进出网关(ApiClient)<br />
+      • 响应契约防御(parseWithFallback)<br />
+      • 实时事件双方(WSClient × Hub)<br />
+      • 应用启动装配(CoreProvider)<br />
+      • 工作区上下文(setCurrentWorkspace)<br />
+      • 业务最重的状态机(TaskService)<br />
+      • 双模式认证状态机(AuthStore)<br />
+      把这 7 个对象当成"骨架",能从任何业务页面顺藤摸瓜读懂剩下的代码。
+    </p>
+  </div>
+
+  <div class="nav-prev-next">
+    <a href="06-task-service.html">
+      <span class="label">‹ 上一个</span>
+      06 · TaskService
+    </a>
+    <a href="index.html">
+      <span class="label">完成 ›</span>
+      回到索引
+    </a>
+  </div>
+
+  <footer>Multica · 关键模块深度解析 · 07</footer>
+</div>
+</body>
+</html>

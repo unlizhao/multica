@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>06 · TaskService · Multica 深度解析</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb">
+    <a href="../overview.html">项目速览</a> <span>›</span>
+    <a href="index.html">关键模块深度解析</a> <span>›</span>
+    <span>06 · TaskService</span>
+  </div>
+
+  <div class="title-block">
+    <h1>TaskService · Agent 任务的全生命周期</h1>
+    <div class="path">server/internal/service/task.go</div>
+    <p class="lede">
+      TaskService 是 Multica <strong>业务最重的一段代码</strong>:协调 issue、agent、runtime/daemon、消息流、token 用量、孤儿回收。
+      指派一个 agent 到一个 issue,从用户点击"分配"开始,到 agent 推完 push、改完 PR 状态、写完总结结束,每一步都经过这里。
+    </p>
+  </div>
+
+  <section>
+    <h2>任务状态机</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="12">
+        <defs>
+          <marker id="ar8" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+        </defs>
+
+        <!-- queued -->
+        <ellipse cx="120" cy="80" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#a1a1aa" />
+        <text x="120" y="78" class="svg-text" text-anchor="middle" font-weight="600">queued</text>
+        <text x="120" y="96" class="svg-text-muted" text-anchor="middle" font-size="10">EnqueueTask</text>
+
+        <!-- claimed -->
+        <ellipse cx="380" cy="80" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#3b82f6" />
+        <text x="380" y="78" class="svg-text" text-anchor="middle" font-weight="600">claimed</text>
+        <text x="380" y="96" class="svg-text-muted" text-anchor="middle" font-size="10">ClaimTask</text>
+
+        <!-- running -->
+        <ellipse cx="640" cy="80" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#f59e0b" />
+        <text x="640" y="78" class="svg-text" text-anchor="middle" font-weight="600">running</text>
+        <text x="640" y="96" class="svg-text-muted" text-anchor="middle" font-size="10">StartTask</text>
+
+        <!-- done / failed -->
+        <ellipse cx="380" cy="220" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#10b981" />
+        <text x="380" y="218" class="svg-text" text-anchor="middle" font-weight="600">done</text>
+        <text x="380" y="236" class="svg-text-muted" text-anchor="middle" font-size="10">CompleteTask</text>
+
+        <ellipse cx="640" cy="220" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#ef4444" />
+        <text x="640" y="218" class="svg-text" text-anchor="middle" font-weight="600">failed</text>
+        <text x="640" y="236" class="svg-text-muted" text-anchor="middle" font-size="10">FailTask</text>
+
+        <ellipse cx="120" cy="220" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#71717a" />
+        <text x="120" y="218" class="svg-text" text-anchor="middle" font-weight="600">cancelled</text>
+        <text x="120" y="236" class="svg-text-muted" text-anchor="middle" font-size="10">CancelTask</text>
+
+        <ellipse cx="120" cy="340" rx="80" ry="32" class="svg-fill-surface-2" stroke-width="1" stroke="#a1a1aa" stroke-dasharray="4 4" />
+        <text x="120" y="338" class="svg-text" text-anchor="middle" font-weight="600">orphan</text>
+        <text x="120" y="354" class="svg-text-muted" text-anchor="middle" font-size="10">cleanup goroutine</text>
+
+        <!-- arrows -->
+        <line x1="200" y1="80" x2="300" y2="80" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar8)" />
+        <text x="250" y="70" class="svg-text-muted" text-anchor="middle" font-size="10">daemon claim</text>
+
+        <line x1="460" y1="80" x2="560" y2="80" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar8)" />
+        <text x="510" y="70" class="svg-text-muted" text-anchor="middle" font-size="10">CLI 启动</text>
+
+        <line x1="600" y1="115" x2="430" y2="190" stroke="#10b981" stroke-width="1.5" marker-end="url(#ar8)" />
+        <text x="540" y="170" class="svg-text-muted" text-anchor="middle" font-size="10">exit 0</text>
+
+        <line x1="640" y1="118" x2="640" y2="180" stroke="#ef4444" stroke-width="1.5" marker-end="url(#ar8)" />
+        <text x="660" y="155" class="svg-text-muted" font-size="10">exit ≠ 0</text>
+
+        <line x1="120" y1="118" x2="120" y2="182" stroke="#71717a" stroke-width="1.5" marker-end="url(#ar8)" />
+        <text x="140" y="155" class="svg-text-muted" font-size="10">user cancel</text>
+
+        <line x1="320" y1="100" x2="180" y2="195" stroke="#71717a" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ar8)" />
+        <text x="240" y="135" class="svg-text-muted" text-anchor="middle" font-size="10">claimed → cancelled</text>
+
+        <line x1="580" y1="105" x2="180" y2="195" stroke="#71717a" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ar8)" />
+
+        <line x1="120" y1="258" x2="120" y2="308" stroke="#a1a1aa" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar8)" />
+        <text x="140" y="290" class="svg-text-muted" font-size="10">心跳超时</text>
+
+        <line x1="200" y1="340" x2="380" y2="258" stroke="#a1a1aa" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#ar8)" />
+        <text x="280" y="320" class="svg-text-muted" text-anchor="middle" font-size="10">recover → fail / done</text>
+      </svg>
+      <figcaption>图 6.1 · 任务状态机:实线为正常流转,虚线为异常路径(取消、超时孤儿)</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>主要方法签名</h2>
+    <table>
+      <thead><tr><th>方法</th><th>调用方</th><th>关键效果</th></tr></thead>
+      <tbody>
+        <tr><td><code>EnqueueTask(ctx, params) → Task</code></td><td>handler(用户分配 agent)、autopilot</td><td>校验 agent + runtime 可用 → INSERT task → emit <code>task.queued</code></td></tr>
+        <tr><td><code>ClaimTask(ctx, daemonID, runtimeID) → *Task</code></td><td>daemon WS</td><td>SELECT FOR UPDATE SKIP LOCKED 抢一个 queued → 改 claimed → emit <code>task.claimed</code></td></tr>
+        <tr><td><code>StartTask(ctx, taskID, processInfo)</code></td><td>daemon WS</td><td>记录 PID/CWD,改 running,issue 状态联动改 in_progress</td></tr>
+        <tr><td><code>AppendMessage(ctx, taskID, msg)</code></td><td>daemon WS</td><td>追加 chat 消息,emit <code>chat.message_appended</code>,触发 inbox 通知</td></tr>
+        <tr><td><code>RecordTokenUsage(ctx, taskID, usage)</code></td><td>daemon WS</td><td>累加 token 数到 task + workspace + agent 三处计数</td></tr>
+        <tr><td><code>CompleteTask(ctx, taskID, result)</code></td><td>daemon WS</td><td>改 done,issue 联动,emit <code>task.completed</code> + inbox 提醒发起人</td></tr>
+        <tr><td><code>FailTask(ctx, taskID, reason)</code></td><td>daemon WS / 心跳超时</td><td>改 failed,issue 退回 backlog 或 blocked,emit <code>task.failed</code></td></tr>
+        <tr><td><code>CancelTask(ctx, taskID, by)</code></td><td>handler(用户点取消)</td><td>下发 daemon kill 信号 → 等 ack → 改 cancelled</td></tr>
+        <tr><td><code>ReclaimOrphans(ctx)</code></td><td>cron(每 N 秒)</td><td>找 running 但 daemon 心跳超时的 task → 标 failed("daemon lost") → 视策略重新 enqueue</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>从用户点击到任务结束的全链路</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 880 460" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="11.5">
+        <defs>
+          <marker id="ar9" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+        </defs>
+        <!-- lanes -->
+        <text x="100" y="20" class="svg-text-muted" text-anchor="middle">User UI</text>
+        <text x="280" y="20" class="svg-text-muted" text-anchor="middle">Server (handler)</text>
+        <text x="460" y="20" class="svg-text-muted" text-anchor="middle">TaskService</text>
+        <text x="640" y="20" class="svg-text-muted" text-anchor="middle">DaemonHub</text>
+        <text x="820" y="20" class="svg-text-muted" text-anchor="middle">Daemon + CLI</text>
+        <line x1="100" y1="30" x2="100" y2="450" class="svg-stroke-border" stroke-dasharray="3 3" />
+        <line x1="280" y1="30" x2="280" y2="450" class="svg-stroke-border" stroke-dasharray="3 3" />
+        <line x1="460" y1="30" x2="460" y2="450" class="svg-stroke-border" stroke-dasharray="3 3" />
+        <line x1="640" y1="30" x2="640" y2="450" class="svg-stroke-border" stroke-dasharray="3 3" />
+        <line x1="820" y1="30" x2="820" y2="450" class="svg-stroke-border" stroke-dasharray="3 3" />
+
+        <!-- step 1 -->
+        <line x1="100" y1="60" x2="280" y2="60" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="190" y="55" class="svg-text" text-anchor="middle">POST /assign</text>
+
+        <!-- step 2 -->
+        <line x1="280" y1="90" x2="460" y2="90" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="370" y="85" class="svg-text" text-anchor="middle">EnqueueTask</text>
+
+        <!-- step 3 -->
+        <rect x="400" y="105" width="120" height="38" rx="6" class="svg-fill-surface-2" stroke="#a1a1aa" />
+        <text x="460" y="120" class="svg-text" text-anchor="middle">INSERT task</text>
+        <text x="460" y="135" class="svg-text-muted" text-anchor="middle" font-size="10">+ emit task.queued</text>
+
+        <!-- step 4 broadcast -->
+        <line x1="460" y1="160" x2="280" y2="170" stroke="#10b981" stroke-width="1" marker-end="url(#ar9)" />
+        <line x1="460" y1="160" x2="640" y2="170" stroke="#10b981" stroke-width="1" marker-end="url(#ar9)" />
+        <text x="370" y="155" class="svg-text-muted" text-anchor="middle" font-size="10">→ realtime.Hub</text>
+
+        <!-- 5 daemon claim -->
+        <line x1="640" y1="200" x2="460" y2="200" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="540" y="195" class="svg-text" text-anchor="middle">ClaimTask</text>
+
+        <line x1="820" y1="180" x2="640" y2="200" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="730" y="170" class="svg-text-muted" text-anchor="middle" font-size="10">daemon poll</text>
+
+        <!-- 6 start -->
+        <line x1="820" y1="230" x2="640" y2="240" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="730" y="225" class="svg-text-muted" text-anchor="middle" font-size="10">spawn CLI</text>
+        <line x1="640" y1="240" x2="460" y2="240" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="540" y="235" class="svg-text" text-anchor="middle">StartTask</text>
+
+        <!-- 7 streaming msgs -->
+        <rect x="450" y="260" width="200" height="38" rx="6" class="svg-fill-surface-2" stroke="#a1a1aa" />
+        <text x="550" y="285" class="svg-text" text-anchor="middle">AppendMessage / RecordTokenUsage</text>
+
+        <line x1="640" y1="295" x2="100" y2="320" stroke="#10b981" stroke-width="1" marker-end="url(#ar9)" />
+        <text x="370" y="318" class="svg-text-muted" text-anchor="middle" font-size="10">WS chat.message_appended → 用户实时看到</text>
+
+        <!-- 8 complete -->
+        <line x1="820" y1="355" x2="640" y2="365" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="730" y="350" class="svg-text-muted" text-anchor="middle" font-size="10">CLI exit 0</text>
+
+        <line x1="640" y1="365" x2="460" y2="365" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar9)" />
+        <text x="540" y="360" class="svg-text" text-anchor="middle">CompleteTask</text>
+
+        <rect x="400" y="380" width="120" height="38" rx="6" class="svg-fill-surface-2" stroke="#a1a1aa" />
+        <text x="460" y="395" class="svg-text" text-anchor="middle">UPDATE done</text>
+        <text x="460" y="410" class="svg-text-muted" text-anchor="middle" font-size="10">issue 联动 in_review</text>
+
+        <line x1="460" y1="430" x2="100" y2="440" stroke="#10b981" stroke-width="1" marker-end="url(#ar9)" />
+        <text x="270" y="438" class="svg-text-muted" text-anchor="start" font-size="10">WS task.completed + inbox 通知</text>
+      </svg>
+      <figcaption>图 6.2 · 一次任务从分配到完成的五方协作时序</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>三个最值得记住的实现细节</h2>
+    <h3>1. ClaimTask 用 SKIP LOCKED 防"惊群"</h3>
+    <pre>SELECT * FROM tasks
+WHERE status = 'queued' AND runtime_id = $1
+ORDER BY priority DESC, created_at ASC
+FOR UPDATE SKIP LOCKED
+LIMIT 1;</pre>
+    <p class="muted">多个 daemon 同时拉取同一队列时,Postgres 用行锁让每个 daemon 拿到不同的任务,无需在 Go 侧自己做分布式协调。</p>
+
+    <h3>2. 一切 emit 都在事务提交后</h3>
+    <p>所有 <code>events.Bus.Emit</code> 都包在 <code>tx.AfterCommit(...)</code> 里(辅助方法 <code>postCommit</code>)。如果事务回滚,WS 不会广播一个"虚假任务",避免客户端拉到一个不存在的 ID。</p>
+
+    <h3>3. 孤儿回收基于"心跳 lease"</h3>
+    <p>daemon 每 5 秒上报心跳,心跳里带 running tasks 列表。<code>ReclaimOrphans</code> cron 找:</p>
+    <ul>
+      <li>状态是 running 但 task.daemon_id 对应 daemon 的 last_seen &gt; 60s</li>
+      <li>状态是 claimed 但 last_seen &gt; 30s</li>
+    </ul>
+    <p class="muted">回收时记录 reason="daemon lost",并按 <code>retry_strategy</code> 决定 enqueue 重试或直接 fail。这条路径覆盖了"用户合上 Mac → 任务卡死"的场景。</p>
+  </section>
+
+  <div class="callout">
+    <p class="callout-title">扩展阅读</p>
+    <p class="callout-body">
+      与 TaskService 紧密协作的:<br />
+      • <code>internal/daemonws/hub.go</code> · daemon ↔ server 的 WS 通道<br />
+      • <code>pkg/protocol/messages.go</code> · 双方契约<br />
+      • <code>internal/handler/agent.go</code> · 入口,把 HTTP 转为 EnqueueTask 调用<br />
+      • <code>pkg/agent/&lt;name&gt;.go</code> · 在 daemon 端被反查,翻译成 CLI 参数
+    </p>
+  </div>
+
+  <div class="nav-prev-next">
+    <a href="05-workspace-storage.html">
+      <span class="label">‹ 上一个</span>
+      05 · setCurrentWorkspace
+    </a>
+    <a href="07-auth-store.html">
+      <span class="label">下一个 ›</span>
+      07 · AuthStore
+    </a>
+  </div>
+
+  <footer>Multica · 关键模块深度解析 · 06</footer>
+</div>
+</body>
+</html>

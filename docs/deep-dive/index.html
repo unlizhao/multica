@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Multica · 关键模块深度解析</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --surface-2: #f4f4f5;
+    --border: #e4e4e7;
+    --border-strong: #d4d4d8;
+    --fg: #18181b;
+    --fg-muted: #71717a;
+    --fg-subtle: #a1a1aa;
+    --brand: #6366f1;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --info: #3b82f6;
+    --destructive: #ef4444;
+    --radius-md: 8px;
+    --radius-lg: 10px;
+    --radius-xl: 14px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+      "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas,
+      monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #09090b; --surface: #111114; --surface-2: #18181b;
+      --border: #27272a; --border-strong: #3f3f46;
+      --fg: #fafafa; --fg-muted: #a1a1aa; --fg-subtle: #71717a;
+      --brand: #818cf8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 14px; line-height: 1.6; }
+  a { color: var(--info); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; }
+  .breadcrumb { font-size: 12px; color: var(--fg-subtle); margin-bottom: 16px; }
+  .breadcrumb a { color: var(--fg-muted); }
+  h1 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+  .lede { color: var(--fg-muted); margin: 0 0 32px; max-width: 720px; }
+
+  .toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 32px; }
+  .toc-card {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    transition: border-color 150ms;
+    display: block;
+    color: var(--fg);
+  }
+  .toc-card:hover { border-color: var(--border-strong); text-decoration: none; }
+  .toc-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--fg-muted);
+    font-family: var(--font-mono); font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .toc-title { font-weight: 500; margin: 0 0 4px; font-size: 14px; }
+  .toc-path { font-family: var(--font-mono); font-size: 12px; color: var(--fg-subtle); margin: 0 0 8px; }
+  .toc-desc { color: var(--fg-muted); font-size: 14px; margin: 0; }
+
+  section { margin-bottom: 32px; }
+  section > h2 { font-size: 14px; font-weight: 500; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; font-size: 14px; background: var(--surface); }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-weight: 500; color: var(--fg-muted); font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  td code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); padding: 1px 6px; border-radius: 6px; }
+
+  .group-title {
+    font-size: 13px; font-weight: 500;
+    margin: 24px 0 10px;
+    color: var(--fg);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .group-title::before {
+    content: ""; width: 3px; height: 14px;
+    background: var(--brand); border-radius: 2px;
+  }
+  .group-title.biz::before { background: var(--success); }
+  .group-meta { color: var(--fg-subtle); font-size: 12px; font-weight: 400; margin-left: 8px; }
+
+  .mod-table { width: 100%; }
+  .mod-table th { font-weight: 500; }
+  .mod-table th.col-imp { width: 60px; text-align: center; }
+  .mod-table th.col-name { width: 140px; }
+  .mod-table th.col-path { width: 220px; }
+  .mod-table td.col-imp { text-align: center; font-size: 13px; }
+  .mod-table td.col-name { font-weight: 500; }
+  .mod-table td.col-path { font-family: var(--font-mono); font-size: 12px; color: var(--fg-subtle); }
+  .mod-table tr.featured td.col-name a { color: var(--info); font-weight: 500; }
+  .mod-table tr.featured { background: color-mix(in oklab, var(--brand) 4%, transparent); }
+  .mod-table tr.featured-biz { background: color-mix(in oklab, var(--success) 4%, transparent); }
+
+  .imp { display: inline-block; font-size: 12px; }
+  .imp-3 { color: var(--destructive); font-weight: 500; }   /* 核心 */
+  .imp-2 { color: var(--warning); font-weight: 500; }       /* 重要 */
+  .imp-1 { color: var(--fg-muted); }                        /* 一般 */
+
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0 12px; font-size: 12px; color: var(--fg-muted); }
+  .legend span.imp { display: inline-flex; align-items: center; gap: 4px; }
+
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--fg-subtle); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb">
+    <a href="../overview.html">项目速览</a> <span>›</span> <span>关键模块深度解析</span>
+  </div>
+  <h1>模块全景与深度解析</h1>
+  <p class="lede">
+    本目录给出 Multica 的<strong>全模块清单</strong>(技术 + 业务),并对其中已沉淀深度解析的模块给出独立解析页。
+    模块按"核心 / 重要 / 一般"三档标记重要程度;<a href="#tech-featured">重点深度解析</a> 部分对核心技术对象逐一展开。
+  </p>
+
+  <div class="legend">
+    <span class="imp imp-3">★★★ 核心</span>
+    <span class="imp imp-2">★★ 重要</span>
+    <span class="imp imp-1">★ 一般</span>
+    <span>· 文件名为 <code>路径/file.ext</code> 表示主入口源码位置</span>
+  </div>
+
+  <!-- ========== 重点深度解析 ========== -->
+  <section id="tech-featured">
+    <h2>重点深度解析(技术对象 · 7 篇)</h2>
+    <p style="color: var(--fg-muted); margin: 0 0 12px;">
+      这 7 个对象覆盖"前后端契约 · 应用装配 · 任务生命周期"三条主干,共 12 张 SVG 图。读完即理解 Multica 的核心运作方式。
+    </p>
+    <div class="toc-grid">
+      <a class="toc-card" href="01-api-client.html">
+        <div class="toc-num">01</div>
+        <div class="toc-title">ApiClient</div>
+        <div class="toc-path">packages/core/api/client.ts</div>
+        <p class="toc-desc">前端唯一 HTTP 入口。统一 header、CSRF、请求 ID、401 处理、ApiError 结构化错误。</p>
+      </a>
+      <a class="toc-card" href="02-parse-with-fallback.html">
+        <div class="toc-num">02</div>
+        <div class="toc-title">parseWithFallback</div>
+        <div class="toc-path">packages/core/api/schema.ts</div>
+        <p class="toc-desc">API 响应契约的最后防线。zod 校验失败只 warn 不 throw,装机版 Electron 不会白屏。</p>
+      </a>
+      <a class="toc-card" href="03-ws-client-and-hub.html">
+        <div class="toc-num">03</div>
+        <div class="toc-title">WSClient × realtime.Hub</div>
+        <div class="toc-path">core/api/ws-client.ts · server/internal/realtime/hub.go</div>
+        <p class="toc-desc">前后端 WebSocket 双方:订阅/广播协议、自动重连、scope room、Redis 多节点中继与去重。</p>
+      </a>
+      <a class="toc-card" href="04-core-provider.html">
+        <div class="toc-num">04</div>
+        <div class="toc-title">CoreProvider</div>
+        <div class="toc-path">packages/core/platform/core-provider.tsx</div>
+        <p class="toc-desc">应用启动装配的"主板"。一次性创建 ApiClient、stores、QueryClient、WS、I18n,Web/Desktop 都包它。</p>
+      </a>
+      <a class="toc-card" href="05-workspace-storage.html">
+        <div class="toc-num">05</div>
+        <div class="toc-title">setCurrentWorkspace</div>
+        <div class="toc-path">packages/core/platform/workspace-storage.ts</div>
+        <p class="toc-desc">"当前工作区"的全局单例。微任务防 React 19 跨组件更新;命名空间存储防止跨工作区数据泄漏。</p>
+      </a>
+      <a class="toc-card" href="06-task-service.html">
+        <div class="toc-num">06</div>
+        <div class="toc-title">TaskService</div>
+        <div class="toc-path">server/internal/service/task.go</div>
+        <p class="toc-desc">Agent 任务全生命周期(enqueue → claim → start → complete/fail → retry)。Multica 业务最重的一段代码。</p>
+      </a>
+      <a class="toc-card" href="07-auth-store.html">
+        <div class="toc-num">07</div>
+        <div class="toc-title">AuthStore</div>
+        <div class="toc-path">packages/core/auth/store.ts</div>
+        <p class="toc-desc">同时支持 Web 的 cookieAuth 与 Desktop 的 token 模式。401 与瞬时错误的区分,析构时清理工作区单例。</p>
+      </a>
+    </div>
+  </section>
+
+  <!-- ========== 业务模块全景 ========== -->
+  <section id="biz-modules">
+    <h2 style="color: var(--success);">业务模块全景(围绕"协作产品"功能)</h2>
+    <p style="color: var(--fg-muted); margin: 0 0 12px;">
+      列出 Multica 当前所有<strong>业务功能模块</strong>。每行注明:重要程度、领域职责、后端入口(<code>handler</code> + <code>service</code>)、前端入口(<code>core</code> + <code>views</code>)、关键不变量与协作对象。
+    </p>
+
+    <h3 class="group-title biz">A. Agent 协作核心域 <span class="group-meta">把 agent 抬升为团队成员的关键代码</span></h3>
+    <table class="mod-table">
+      <thead>
+        <tr>
+          <th class="col-imp">重要</th>
+          <th class="col-name">模块</th>
+          <th class="col-path">后端入口</th>
+          <th class="col-path">前端入口</th>
+          <th>职责 · 关键状态 / 不变量</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Issues</td>
+          <td class="col-path">handler/issue.go · issue_metadata.go · issue_reaction.go · issue_child_done.go</td>
+          <td class="col-path">core/issues · views/issues</td>
+          <td>Issue CRUD、子任务、看板/列表/甘特、批量操作、提及、订阅、scheduled、grouped 视图。<strong>状态枚举固定</strong>(backlog/triage/todo/in_progress/done/cancelled);WS 事件驱动 React Query 失效。</td>
+        </tr>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Agents</td>
+          <td class="col-path">handler/agent.go · agent_access.go · agent_template.go</td>
+          <td class="col-path">core/agents · views/agents</td>
+          <td>Agent profile、模板(24 个内置 <code>agenttmpl/templates/*.json</code>)、可见性(workspace / private / shared)、presence 探测、活动流、live peek。</td>
+        </tr>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Tasks</td>
+          <td class="col-path"><a href="06-task-service.html">service/task.go</a> · handler/task_lifecycle.go · service/agent_ready.go · empty_claim_cache.go</td>
+          <td class="col-path">views/issues/agent-live-card · execution-log-section</td>
+          <td><strong>Multica 业务最重一段</strong>。Agent 任务的 enqueue → claim → start → complete/fail → retry。空认领缓存、heartbeat、终止、并发安全(complete-race 测试覆盖)。</td>
+        </tr>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Squads</td>
+          <td class="col-path">handler/squad.go · squad_briefing.go · service/squad_no_action.go</td>
+          <td class="col-path">core/squads · views/squads</td>
+          <td>Agent 团队;leader 路由、briefing 决策、no-action 兜底、assign / comment 触发器。<strong>团队级别</strong>稳定指派的关键。</td>
+        </tr>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Skills</td>
+          <td class="col-path">handler/skill.go · skill_create.go · runtime_local_skills*.go</td>
+          <td class="col-path">core/runtimes/local-skills · views/skills</td>
+          <td>可复用能力沉淀;支持 workspace 级 skill + 本地 runtime 同步上来的 local skill。Redis store 缓存,跨任务复利。</td>
+        </tr>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Autopilots</td>
+          <td class="col-path">handler/autopilot.go · autopilot_webhook.go · service/autopilot.go · webhook_rate_limiter.go</td>
+          <td class="col-path">core/autopilots · views/autopilots</td>
+          <td>规则 + 触发器自动开工(assign / comment / mention / scheduled / webhook);webhook 投递与限流、squad 路由分支。</td>
+        </tr>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Runtimes</td>
+          <td class="col-path">handler/runtime*.go · cloud_runtime.go · runtime_models*.go · runtime_update*.go · runtime_liveness_store.go</td>
+          <td class="col-path">core/runtimes · views/runtimes</td>
+          <td>本地 daemon + 云端 runtime 双形态、模型清单、更新报告、健康度、可见性、自定义计费;heartbeat scheduler 维持 liveness。</td>
+        </tr>
+        <tr class="featured-biz">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Chat</td>
+          <td class="col-path">handler/chat.go</td>
+          <td class="col-path">core/chat · views/chat</td>
+          <td>与 agent 的多轮对话;同一 (agent, issue) 的上下文锚点(context-anchor)自动恢复;FAB + 分屏窗口形态。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="group-title biz">B. 协作基础(项目管理领域)</h3>
+    <table class="mod-table">
+      <thead>
+        <tr>
+          <th class="col-imp">重要</th>
+          <th class="col-name">模块</th>
+          <th class="col-path">后端入口</th>
+          <th class="col-path">前端入口</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Workspace</td>
+          <td class="col-path">handler/workspace.go · workspace_reserved_slugs.go · workspace_revoke.go</td>
+          <td class="col-path">core/workspace · views/workspace</td>
+          <td>多工作区、成员、保留 slug 黑名单、销毁/吊销;<a href="05-workspace-storage.html">workspace 单例</a>是其前端核心。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Projects</td>
+          <td class="col-path">handler/project.go · project_resource.go</td>
+          <td class="col-path">core/projects · views/projects</td>
+          <td>项目分组、负责人、关联资源(GitHub repo 等)、issue 度量。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Members & Invitations</td>
+          <td class="col-path">handler/invitation.go · workspace.go(member 部分)</td>
+          <td class="col-path">views/members · views/invitations · views/invite</td>
+          <td>成员管理、邀请、加入流程;权限规则在 <code>core/permissions</code>。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Comments & Reactions</td>
+          <td class="col-path">handler/comment.go · reaction.go · issue_reaction.go</td>
+          <td class="col-path">views/issues/components/comment-* · resolved-thread-bar</td>
+          <td>评论(含解决线程)、emoji 反应;Tiptap 富文本承载,提及触发 autopilot。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Inbox</td>
+          <td class="col-path">handler/inbox.go</td>
+          <td class="col-path">core/inbox(含 ws-updaters) · views/inbox</td>
+          <td>通知聚合;WS 增量更新前端 React Query 缓存。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Notification Preferences</td>
+          <td class="col-path">handler/notification_preference.go</td>
+          <td class="col-path">core/notification-preferences</td>
+          <td>用户/工作区级别的通知开关。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Labels</td>
+          <td class="col-path">handler/label.go</td>
+          <td class="col-path">core/labels · views/labels</td>
+          <td>标签 CRUD 与 issue 关联。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Pins</td>
+          <td class="col-path">handler/pin.go</td>
+          <td class="col-path">core/pins</td>
+          <td>收藏 issue / 视图。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Subscribers</td>
+          <td class="col-path">handler/subscriber.go</td>
+          <td class="col-path">core/issues 中的订阅 hook</td>
+          <td>显式订阅 issue。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Activity</td>
+          <td class="col-path">handler/activity.go</td>
+          <td class="col-path">views/agents/activity-tab · agent-activity-hover-content</td>
+          <td>系统活动流(状态变更、指派、评论汇总)。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="group-title biz">C. 用户旅程与运营域</h3>
+    <table class="mod-table">
+      <thead>
+        <tr>
+          <th class="col-imp">重要</th>
+          <th class="col-name">模块</th>
+          <th class="col-path">后端入口</th>
+          <th class="col-path">前端入口</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Auth & PAT</td>
+          <td class="col-path">handler/auth.go · personal_access_token.go · auth/cookie · jwt</td>
+          <td class="col-path"><a href="07-auth-store.html">core/auth</a> · views/auth</td>
+          <td>登录、注册、PAT;Web cookie / Desktop token 双模式。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Onboarding</td>
+          <td class="col-path">handler/onboarding.go · onboarding_shim.go</td>
+          <td class="col-path">core/onboarding · views/onboarding(steps · templates)</td>
+          <td>新用户引导:角色 / 来源 / 用例 / 平台 / runtime 接入 / 第一个 issue;模板推荐。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Dashboard</td>
+          <td class="col-path">handler/dashboard.go</td>
+          <td class="col-path">core/dashboard · views/dashboard</td>
+          <td>工作区仪表盘:活跃 agent、近期任务、统计图。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Search</td>
+          <td class="col-path">handler/search_test.go(集成)+ issue/agent/skill 搜索分支</td>
+          <td class="col-path">views/search(command palette)</td>
+          <td>全局搜索;命令面板形态。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">My Issues</td>
+          <td class="col-path">基于 issue handler 的过滤分支</td>
+          <td class="col-path">views/my-issues · core/issues 的 my-issues-view-store</td>
+          <td>"分配给我"的视图;独立持久化 view store。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Settings</td>
+          <td class="col-path">handler/config.go · github.go · notification_preference.go</td>
+          <td class="col-path">views/settings(account/workspace/members/integrations/github/labs/preferences/repositories/tokens/notifications)</td>
+          <td>账户/工作区/集成/偏好/仓库/PAT 等设置面板的聚合页。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Feedback / Contact Sales</td>
+          <td class="col-path">handler/feedback.go · contact_sales.go</td>
+          <td class="col-path">core/feedback · views/modals/feedback</td>
+          <td>用户反馈、销售线索表单。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="group-title biz">D. 集成 & 内容</h3>
+    <table class="mod-table">
+      <thead>
+        <tr>
+          <th class="col-imp">重要</th>
+          <th class="col-name">模块</th>
+          <th class="col-path">后端入口</th>
+          <th class="col-path">前端入口</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">GitHub</td>
+          <td class="col-path">handler/github.go</td>
+          <td class="col-path">core/github · views/settings/github-tab · views/issues/pull-request-list</td>
+          <td>GitHub App 安装、仓库选择、PR 状态与 issue 关联。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Files / Attachments</td>
+          <td class="col-path">handler/file.go · storage/{local,s3}.go</td>
+          <td class="col-path">core/hooks/use-file-upload · views/editor/attachment-* · views/attachments</td>
+          <td>文件上传、预览;后端可切 local / S3 存储。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Editor</td>
+          <td class="col-path">—(纯前端)</td>
+          <td class="col-path">views/editor(extensions/* · attachment-* · code-block · mention-suggestion · markdown-paste · math · mermaid)</td>
+          <td>Tiptap 富文本编辑器;mention、代码块、文件卡片、math、mermaid、HTML 预览。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Webhook Delivery</td>
+          <td class="col-path">handler/webhook_delivery.go · webhook_rate_limiter.go</td>
+          <td class="col-path">views/autopilots/webhook-deliveries-section</td>
+          <td>autopilot 的外部 webhook 投递记录、限流。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Cloud Runtime 供应</td>
+          <td class="col-path">handler/cloud_runtime.go · cloudruntime/client.go</td>
+          <td class="col-path">views/runtimes/cloud-runtime-dialog</td>
+          <td>云端 runtime 节点的开通与对接。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== 技术模块全景 ========== -->
+  <section id="tech-modules">
+    <h2 style="color: var(--brand);">技术模块全景(基础设施)</h2>
+    <p style="color: var(--fg-muted); margin: 0 0 12px;">支撑业务运行的横向能力。已经做了独立深度解析的对象在"模块"列上加链接。</p>
+
+    <h3 class="group-title">E. 前端基础设施</h3>
+    <table class="mod-table">
+      <thead>
+        <tr>
+          <th class="col-imp">重要</th>
+          <th class="col-name">模块</th>
+          <th class="col-path">主入口</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="featured">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name"><a href="01-api-client.html">ApiClient</a></td>
+          <td class="col-path">packages/core/api/client.ts</td>
+          <td>前端唯一 HTTP 入口:统一 header、CSRF、请求 ID、401 处理、ApiError 结构化错误。</td>
+        </tr>
+        <tr class="featured">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name"><a href="02-parse-with-fallback.html">parseWithFallback</a></td>
+          <td class="col-path">packages/core/api/schema.ts</td>
+          <td>API 响应契约的最后防线。zod 校验失败只 warn 不 throw,装机版 Electron 不会白屏。</td>
+        </tr>
+        <tr class="featured">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name"><a href="03-ws-client-and-hub.html">WSClient</a></td>
+          <td class="col-path">packages/core/api/ws-client.ts</td>
+          <td>前端 WS:订阅/广播协议、自动重连、scope room。</td>
+        </tr>
+        <tr class="featured">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name"><a href="04-core-provider.html">CoreProvider</a></td>
+          <td class="col-path">packages/core/platform/core-provider.tsx</td>
+          <td>应用启动装配的"主板"。一次性创建 ApiClient、stores、QueryClient、WS、I18n,Web/Desktop 共享。</td>
+        </tr>
+        <tr class="featured">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name"><a href="05-workspace-storage.html">workspace-storage</a></td>
+          <td class="col-path">packages/core/platform/workspace-storage.ts</td>
+          <td>"当前工作区"全局单例。微任务防 React 19 跨组件更新;命名空间存储防止跨工作区数据泄漏。</td>
+        </tr>
+        <tr class="featured">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name"><a href="07-auth-store.html">AuthStore</a></td>
+          <td class="col-path">packages/core/auth/store.ts</td>
+          <td>同时支持 Web cookieAuth 与 Desktop token;401 与瞬时错误的区分;析构清理工作区单例。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Realtime Provider</td>
+          <td class="col-path">packages/core/realtime/provider.tsx · use-realtime-sync.ts</td>
+          <td>WS 事件 → React Query invalidation 的桥;装载在 CoreProvider 内,所有 ws-updaters 由它驱动。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">QueryClient</td>
+          <td class="col-path">packages/core/query-client.ts</td>
+          <td>TanStack Query 全局实例;统一 retry / staleTime / 错误处理。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Persist Storage</td>
+          <td class="col-path">packages/core/platform/persist-storage.ts · storage.ts · storage-cleanup.ts</td>
+          <td>命名空间化的持久化 store(localStorage 抽象 + 平台桥);Zustand persist 全部走它。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">i18n</td>
+          <td class="col-path">packages/core/i18n/* · packages/views/locales/{en,zh-Hans}/*.json</td>
+          <td>i18next + react-i18next;25 个命名空间双语平行;<code>parity.test</code> 强制双语完整。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Permissions</td>
+          <td class="col-path">packages/core/permissions/rules.ts</td>
+          <td>前端规则引擎;与后端 ACL 互为补集,UI 提前隐藏不可用动作。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Navigation Adapter</td>
+          <td class="col-path">packages/core/navigation/* · packages/views/navigation/*</td>
+          <td>抽象 next/navigation 与 react-router-dom;views 包的"零路由"约束靠它。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Modals Registry</td>
+          <td class="col-path">packages/core/modals/store.ts · packages/views/modals/registry.tsx</td>
+          <td>全局模态栈;命名注册 + 跨页面打开。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Paths / Reserved Slugs</td>
+          <td class="col-path">packages/core/paths/*</td>
+          <td>统一 URL 生成与解析;reserved slug 与后端 <code>handler/reserved_slugs.json</code> 对齐。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Markdown / Mention</td>
+          <td class="col-path">packages/core/markdown/* · server/internal/mention/expand.go</td>
+          <td>提及短码、Markdown 处理;前后端协同展开 mention。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Analytics</td>
+          <td class="col-path">packages/core/analytics/* · server/internal/analytics/posthog.go</td>
+          <td>PostHog 事件埋点。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Logger</td>
+          <td class="col-path">packages/core/logger.ts · server/internal/logger/logger.go</td>
+          <td>统一日志接口。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="group-title">F. 后端基础设施</h3>
+    <table class="mod-table">
+      <thead>
+        <tr>
+          <th class="col-imp">重要</th>
+          <th class="col-name">模块</th>
+          <th class="col-path">主入口</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="featured">
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name"><a href="03-ws-client-and-hub.html">realtime.Hub</a></td>
+          <td class="col-path">server/internal/realtime/hub.go · broadcaster.go</td>
+          <td>后端 WS 广播 Hub:rooms / clients / scope 订阅。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Realtime Redis Relay</td>
+          <td class="col-path">server/internal/realtime/{redis_relay,sharded_stream_relay,relay_lifecycle}.go</td>
+          <td><strong>多节点中继</strong>:支持 sharded · dual · legacy 三模式;Redis Streams 分片广播 + 消费者组去重。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">DaemonWS Hub</td>
+          <td class="col-path">server/internal/daemonws/{hub,notifier,metrics}.go</td>
+          <td><strong>本地 daemon 通道</strong>:面向 multica CLI 的私有 WS 协议;任务下发与心跳上报。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-3">★★★</span></td>
+          <td class="col-name">Daemon</td>
+          <td class="col-path">server/internal/daemon/* · execenv/*</td>
+          <td>本地 agent 执行器:codex/openclaw 配置、execenv 沙箱、prompt 组装、自动更新、health、垃圾回收、本地 skill 同步。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Events Bus</td>
+          <td class="col-path">server/internal/events/bus.go</td>
+          <td>进程内事件总线;service 层 publish,handler 与 hub 订阅。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Middleware</td>
+          <td class="col-path">server/internal/middleware/{auth,workspace,ratelimit,csp,cloudfront,client,daemon_auth,request_logger}.go</td>
+          <td>HTTP 横切关注点的全集合;workspace middleware 是"通过 slug 解析当前 ws"的关键。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Auth(后端)</td>
+          <td class="col-path">server/internal/auth/{cookie,jwt,cloudfront,daemon_token_cache,membership_cache,pat_cache}.go</td>
+          <td>cookie/JWT/CloudFront 签名、PAT、daemon token、成员关系缓存。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Migrations</td>
+          <td class="col-path">server/internal/migrations/migrations.go(嵌入 80+ SQL)</td>
+          <td>双向迁移工具;每个迁移单文件、含 up/down。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Storage(对象存储)</td>
+          <td class="col-path">server/internal/storage/{local,s3,util}.go</td>
+          <td>文件抽象层:本地 / S3 后端可切换。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Metrics</td>
+          <td class="col-path">server/internal/metrics/{db,http,daemonws,realtime,registry,server}.go</td>
+          <td>Prometheus 注册表;DB / HTTP / WS / Daemon / Realtime 五类指标。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Cron / Scheduler</td>
+          <td class="col-path">server/internal/service/cron.go · handler/heartbeat_scheduler.go</td>
+          <td>计划任务、心跳扫描;cleanup 与 liveness 维护。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-2">★★</span></td>
+          <td class="col-name">Email</td>
+          <td class="col-path">server/internal/service/email.go</td>
+          <td>邀请、通知邮件发送。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Agent Templates</td>
+          <td class="col-path">server/internal/agenttmpl/loader.go · templates/*.json(24 个内置)</td>
+          <td>开箱即用的 agent 模板:bug-fixer · code-reviewer · prd-drafter · translator-zh-en 等。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">CLI</td>
+          <td class="col-path">server/internal/cli/* · server/cmd/multica/main.go</td>
+          <td>multica CLI:login / daemon / issue / agent / update,Cobra 实现,GoReleaser 分发。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Issue Guard</td>
+          <td class="col-path">server/internal/issueguard/duplicate.go</td>
+          <td>重复 issue 检测(跨提交 / 相似度)。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Cloud Runtime Client</td>
+          <td class="col-path">server/internal/cloudruntime/client.go</td>
+          <td>云端 runtime 控制面客户端。</td>
+        </tr>
+        <tr>
+          <td class="col-imp"><span class="imp imp-1">★</span></td>
+          <td class="col-name">Util / Pgx</td>
+          <td class="col-path">server/internal/util/{pgx,text,mention,proc_*}.go</td>
+          <td>pgx 类型转换、文本工具、平台进程探测。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== 重要程度 & 阅读顺序 ========== -->
+  <section>
+    <h2>重点对象速查表(★★★ 核心)</h2>
+    <table>
+      <thead>
+        <tr><th>模块</th><th>类型</th><th>关键状态</th><th>典型协作者</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Issues</td><td>业务</td><td>状态枚举固定</td><td>Comments · Labels · Subscribers · Inbox</td></tr>
+        <tr><td>Agents</td><td>业务</td><td>visibility · presence</td><td>Agent Templates · Skills · Runtimes</td></tr>
+        <tr><td>Tasks</td><td>业务</td><td>queued → running → done/failed</td><td>Daemon · Hub · Bus · empty_claim_cache</td></tr>
+        <tr><td>Squads</td><td>业务</td><td>leader · briefing</td><td>Agents · Autopilots · Issues</td></tr>
+        <tr><td>Skills</td><td>业务</td><td>workspace / local 双源</td><td>Runtimes(local skills 同步)</td></tr>
+        <tr><td>Autopilots</td><td>业务</td><td>触发器 + webhook</td><td>Issues · Comments · Squads · webhook delivery</td></tr>
+        <tr><td>Runtimes</td><td>业务</td><td>liveness · models · update</td><td>Daemon · Cloud Runtime · Skills</td></tr>
+        <tr><td>Chat</td><td>业务</td><td>context-anchor</td><td>Agents · Tasks</td></tr>
+        <tr><td>ApiClient</td><td>技术</td><td>token · baseUrl</td><td>AuthStore · QueryClient</td></tr>
+        <tr><td>parseWithFallback</td><td>技术</td><td>无(纯函数)</td><td>ApiClient · zod schema</td></tr>
+        <tr><td>WSClient</td><td>技术</td><td>handlers · 重连定时器</td><td>realtime.Hub · WSProvider</td></tr>
+        <tr><td>realtime.Hub + Redis Relay</td><td>技术</td><td>rooms · clients · scope</td><td>Events Bus · Redis Streams</td></tr>
+        <tr><td>CoreProvider</td><td>技术</td><td>模块级单例</td><td>所有 stores · WSProvider</td></tr>
+        <tr><td>workspace-storage</td><td>技术</td><td>_currentSlug · _currentWsId</td><td>WSProvider · 持久化 store · ApiClient</td></tr>
+        <tr><td>TaskService</td><td>业务+技术</td><td>queued → running → done/failed/cancelled</td><td>db.Queries · Hub · DaemonHub · Bus</td></tr>
+        <tr><td>AuthStore</td><td>技术</td><td>user · isLoading</td><td>ApiClient · workspace-storage</td></tr>
+        <tr><td>Daemon / DaemonWS</td><td>技术</td><td>本地 agent 执行器</td><td>execenv · TaskService · CLI</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    Multica · 模块全景与深度解析 · 模块清单基于 main 分支源码;后续新增模块请同步更新本表。
+  </footer>
+</div>
+</body>
+</html>

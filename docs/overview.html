@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Multica · 项目速览</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --surface-2: #f4f4f5;
+    --border: #e4e4e7;
+    --border-strong: #d4d4d8;
+    --fg: #18181b;
+    --fg-muted: #71717a;
+    --fg-subtle: #a1a1aa;
+    --brand: #6366f1;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --info: #3b82f6;
+    --destructive: #ef4444;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 10px;
+    --radius-xl: 14px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+      "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas,
+      monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #09090b;
+      --surface: #111114;
+      --surface-2: #18181b;
+      --border: #27272a;
+      --border-strong: #3f3f46;
+      --fg: #fafafa;
+      --fg-muted: #a1a1aa;
+      --fg-subtle: #71717a;
+      --brand: #818cf8;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  a { color: var(--info); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Layout */
+  .shell {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+  }
+  .sidebar {
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    padding: 24px 16px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .brand-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 24px;
+    padding: 0 8px;
+  }
+  .brand-mark {
+    width: 28px; height: 28px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--brand), #a855f7);
+    display: grid; place-items: center;
+    color: #fff; font-weight: 500; font-size: 14px;
+  }
+  .brand-name { font-weight: 500; font-size: 14px; }
+  .brand-meta { color: var(--fg-muted); font-size: 12px; }
+
+  .nav-group { margin-bottom: 16px; }
+  .nav-label {
+    color: var(--fg-subtle);
+    font-size: 12px;
+    padding: 4px 8px;
+    letter-spacing: 0.02em;
+  }
+  .nav a {
+    display: block;
+    padding: 6px 8px;
+    border-radius: var(--radius-md);
+    color: var(--fg-muted);
+    font-size: 14px;
+    transition: background-color 150ms, color 150ms;
+  }
+  .nav a:hover {
+    background: var(--surface-2);
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .main { padding: 32px 40px 80px; max-width: 1100px; }
+
+  /* Hero */
+  .hero {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-xl);
+    padding: 32px;
+    margin-bottom: 24px;
+  }
+  .hero h1 {
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0 0 8px;
+  }
+  .hero .tagline {
+    color: var(--fg-muted);
+    margin: 0 0 16px;
+    font-size: 14px;
+  }
+  .hero .pitch {
+    font-size: 14px;
+    color: var(--fg);
+    margin: 0;
+    max-width: 720px;
+  }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 16px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+  }
+  .badge.brand { color: var(--brand); border-color: color-mix(in oklab, var(--brand) 30%, var(--border)); }
+  .badge.success { color: var(--success); }
+  .badge.warning { color: var(--warning); }
+  .badge.info { color: var(--info); }
+
+  /* Section */
+  section { margin-bottom: 32px; }
+  section > h2 {
+    font-size: 14px; font-weight: 500;
+    margin: 0 0 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  section > h2::before {
+    content: "";
+    width: 3px; height: 14px;
+    background: var(--fg);
+    border-radius: 2px;
+  }
+  section > p {
+    color: var(--fg-muted);
+    margin: 0 0 16px;
+    max-width: 800px;
+  }
+
+  /* Card grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    transition: border-color 150ms, background-color 150ms;
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .card .title {
+    font-weight: 500; font-size: 14px;
+    margin: 0 0 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .card .title .tag {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg-subtle);
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-weight: 400;
+  }
+  .card p { margin: 0; color: var(--fg-muted); font-size: 14px; }
+  .card ul { margin: 8px 0 0; padding-left: 16px; color: var(--fg-muted); font-size: 14px; }
+  .card ul li { margin: 2px 0; }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    font-size: 14px;
+    background: var(--surface);
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { background: var(--surface-2); font-weight: 500; color: var(--fg-muted); font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  td code, p code, li code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); padding: 1px 6px; border-radius: var(--radius-sm); color: var(--fg); }
+
+  /* Architecture diagram */
+  .arch {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg-muted);
+    white-space: pre;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+
+  /* Layered list */
+  .layers { display: flex; flex-direction: column; gap: 8px; }
+  .layer {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 16px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    align-items: start;
+  }
+  .layer .lname { font-weight: 500; font-size: 14px; }
+  .layer .lpath { font-family: var(--font-mono); font-size: 12px; color: var(--fg-subtle); display: block; margin-top: 2px; }
+  .layer .ldesc { color: var(--fg-muted); }
+
+  /* Rule list */
+  .rules { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .rules li {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+  .rules .icon {
+    width: 20px; height: 20px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--info) 15%, transparent);
+    color: var(--info);
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 500;
+    margin-top: 2px;
+  }
+  .rules .danger .icon { background: color-mix(in oklab, var(--destructive) 15%, transparent); color: var(--destructive); }
+  .rules .ok .icon { background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success); }
+  .rules strong { font-weight: 500; }
+
+  /* Commands */
+  .cmd {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg);
+    overflow-x: auto;
+  }
+  .cmd .comment { color: var(--fg-subtle); }
+
+  /* Two-col */
+  .two-col {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  }
+
+  /* Footer */
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    color: var(--fg-subtle);
+    font-size: 12px;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    .main { padding: 24px 20px 60px; }
+    .two-col { grid-template-columns: 1fr; }
+    .layer { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand-row">
+      <div class="brand-mark">M</div>
+      <div>
+        <div class="brand-name">Multica</div>
+        <div class="brand-meta">项目速览</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="nav-label">概览</div>
+        <a href="#what">这是什么</a>
+        <a href="#stack">技术栈</a>
+        <a href="#architecture">系统架构</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">代码地图</div>
+        <a href="#monorepo">Monorepo 布局</a>
+        <a href="#backend">Go 后端</a>
+        <a href="#core">packages/core</a>
+        <a href="#views-ui">views & ui</a>
+        <a href="#apps">前端应用</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">关键约束</div>
+        <a href="#state">状态管理</a>
+        <a href="#boundaries">包边界</a>
+        <a href="#api-contract">API 契约</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">动手</div>
+        <a href="#commands">常用命令</a>
+        <a href="#features">业务模块</a>
+        <a href="#refs">扩展阅读</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">深入</div>
+        <a href="./deep-dive/index.html">模块全景与深度解析 →</a>
+        <a href="./deep-dive/index.html#biz-modules" style="padding-left: 18px; font-size: 13px;">└ 业务模块全景</a>
+        <a href="./deep-dive/index.html#tech-modules" style="padding-left: 18px; font-size: 13px;">└ 技术模块全景</a>
+        <a href="./deep-dive/index.html#tech-featured" style="padding-left: 18px; font-size: 13px;">└ 重点 7 篇</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">参考</div>
+        <a href="./structure/index.html">目录结构与包用途 →</a>
+        <a href="./er/index.html">数据模型 ER 图 →</a>
+        <a href="./backend/index.html">Go 后端结构与流程 →</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">调研</div>
+        <a href="./research/meego-vs-multica.html">飞书 MeeGo → Multica 迁移 →</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <h1>Multica · AI-native 任务管理平台</h1>
+      <p class="tagline">Multiplexed Information and Computing Agent · 致敬 Multics 的"分时复用",这次复用的是人和 AI</p>
+      <p class="pitch">
+        像给同事分配任务一样,把 issue 指派给一个 agent —— 它会自己认领、写代码、报阻塞、改状态。
+        Agent 是一等公民:有 profile、出现在看板、留评论、创建 issue。
+        支持 Claude Code / Codex / Copilot CLI / Gemini / Cursor / Kimi / Kiro 等十余种 CLI agent,
+        通过本地 daemon 或云端 runtime 执行。
+      </p>
+      <div class="badges">
+        <span class="badge brand">开源</span>
+        <span class="badge">Go 1.26 + Next.js 16</span>
+        <span class="badge">Electron</span>
+        <span class="badge">Expo iOS</span>
+        <span class="badge success">Self-host 友好</span>
+        <span class="badge info">PostgreSQL + pgvector</span>
+      </div>
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap;">
+        <a href="./deep-dive/index.html" style="display: inline-flex; align-items: center; gap: 6px;">
+          📐 模块全景与深度解析 →
+        </a>
+        <a href="./structure/index.html" style="display: inline-flex; align-items: center; gap: 6px;">
+          🗂 目录结构与包用途 →
+        </a>
+        <a href="./er/index.html" style="display: inline-flex; align-items: center; gap: 6px;">
+          🧬 数据模型 ER 图 →
+        </a>
+        <a href="./backend/index.html" style="display: inline-flex; align-items: center; gap: 6px;">
+          ⚙️ Go 后端结构与流程 →
+        </a>
+        <a href="./research/meego-vs-multica.html" style="display: inline-flex; align-items: center; gap: 6px;">
+          🔄 飞书 MeeGo → Multica 迁移调研 →
+        </a>
+      </div>
+    </div>
+
+    <!-- WHAT -->
+    <section id="what">
+      <h2>这是什么</h2>
+      <p>
+        Multica 不是一个"AI 工具",而是一个 <strong>人 + AI 协作的任务管理平台</strong>。
+        Agent 和人共用同一个看板;同一个 (agent, issue) 的多轮对话会自动恢复上下文;
+        Skill 系统把历史方案沉淀为可复用能力;Autopilot 让 agent 按规则自动开工。
+      </p>
+      <div class="grid">
+        <div class="card">
+          <div class="title">Agents as Teammates</div>
+          <p>有 profile,被指派、留评论、创建 issue、报阻塞。</p>
+        </div>
+        <div class="card">
+          <div class="title">Squads</div>
+          <p>用 leader agent 路由任务到组,稳定的"团队级别"分配。</p>
+        </div>
+        <div class="card">
+          <div class="title">Autonomous Execution</div>
+          <p>WebSocket 实时进度流,任务全生命周期管理。</p>
+        </div>
+        <div class="card">
+          <div class="title">Reusable Skills</div>
+          <p>把每次解决方案沉淀为可复用 skill,跨任务复利。</p>
+        </div>
+        <div class="card">
+          <div class="title">Unified Runtimes</div>
+          <p>本地 daemon + 云端节点,统一面板,自动发现可用 CLI。</p>
+        </div>
+        <div class="card">
+          <div class="title">Multi-Workspace</div>
+          <p>工作区级隔离,各自的 agents、issues、settings。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- STACK -->
+    <section id="stack">
+      <h2>技术栈一览</h2>
+      <table>
+        <thead>
+          <tr><th style="width: 140px">分层</th><th>技术</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>后端</td><td>Go 1.26 · Chi · sqlc · pgx/v5 · gorilla/websocket · go-redis · Prometheus</td></tr>
+          <tr><td>数据库</td><td>PostgreSQL 17 + pgvector · 80+ 单文件双向迁移</td></tr>
+          <tr><td>消息/缓存</td><td>Redis(可选,多节点 fanout 用 Streams 分片中继)</td></tr>
+          <tr><td>Web</td><td>Next.js 16 (App Router) · React 19 · TanStack Query 5 · Zustand 5</td></tr>
+          <tr><td>桌面</td><td>Electron · electron-vite · react-router-dom · 多 tab + WindowOverlay</td></tr>
+          <tr><td>移动</td><td>Expo SDK 55 · React Native 0.83(独立技术栈,只共享类型)</td></tr>
+          <tr><td>UI</td><td>shadcn over Base UI · Tailwind 4 · Lucide · Tiptap 3 编辑器</td></tr>
+          <tr><td>验证</td><td>zod 4(API 响应防御层)</td></tr>
+          <tr><td>i18n</td><td>i18next + react-i18next(en / zh-Hans 平行)</td></tr>
+          <tr><td>测试</td><td>Vitest · Testing Library · Playwright · go test</td></tr>
+          <tr><td>构建</td><td>pnpm 10 workspaces · Turborepo · pnpm catalog 统一版本</td></tr>
+          <tr><td>分发</td><td>GoReleaser · Homebrew tap · GHCR 镜像 · electron-builder</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ARCHITECTURE -->
+    <section id="architecture">
+      <h2>系统架构</h2>
+      <p>客户端通过 HTTPS + WebSocket 与 Go 后端通信;后端通过 daemon 协议(WS)调度本地或云端的 agent CLI 执行任务。</p>
+      <div class="arch">┌──────────────┐      ┌──────────────┐      ┌──────────────────┐
+│  Next.js     │ ───> │  Go Backend  │ ───> │   PostgreSQL 17  │
+│  Electron    │      │  Chi + WS    │      │   + pgvector     │
+│  Expo iOS    │ <─── │  + Redis     │ <─── │                  │
+└──────────────┘      └──────┬───────┘      └──────────────────┘
+                             │ WebSocket
+                      ┌──────┴────────┐
+                      │ Agent Daemon  │  本地 / 云端
+                      │ Claude · Codex · Copilot · Gemini · ... │
+                      └───────────────┘</div>
+    </section>
+
+    <!-- MONOREPO -->
+    <section id="monorepo">
+      <h2>Monorepo 布局</h2>
+      <p>pnpm workspaces + Turborepo,共享包导出原始 .ts/.tsx,由消费者 bundler 直接编译,零配置 HMR。</p>
+      <div class="layers">
+        <div class="layer">
+          <div>
+            <div class="lname">server/</div>
+            <code class="lpath">Go 后端</code>
+          </div>
+          <div class="ldesc">HTTP API + WebSocket + sqlc 生成的 DB 层 + multica CLI + 本地 daemon。所有业务逻辑的真源。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">apps/web/</div>
+            <code class="lpath">Next.js 16</code>
+          </div>
+          <div class="ldesc">App Router · 营销站 + 应用 + Onboarding · 唯一允许使用 next/* API 的地方。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">apps/desktop/</div>
+            <code class="lpath">Electron</code>
+          </div>
+          <div class="ldesc">多标签 · 原生托盘 · 自动更新 · 与本地 daemon 走 IPC · 唯一允许使用 react-router-dom 的地方。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">apps/mobile/</div>
+            <code class="lpath">Expo / RN</code>
+          </div>
+          <div class="ldesc">独立王国,仅以 import type 复用 @multica/core 的类型与纯函数。锁定 Expo 的 React 版本。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">apps/docs/</div>
+            <code class="lpath">Fumadocs</code>
+          </div>
+          <div class="ldesc">公开文档站。约定的"单一真源"位于这里(命名约定、i18n 术语表、中文风格指南)。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">packages/core/</div>
+            <code class="lpath">无 react-dom</code>
+          </div>
+          <div class="ldesc">业务大脑:API client、Zustand stores、React Query hooks、WS、平台桥(CoreProvider)。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">packages/ui/</div>
+            <code class="lpath">shadcn / Base UI</code>
+          </div>
+          <div class="ldesc">原子组件,纯 UI。禁止 import @multica/core。通过 <code>pnpm ui:add</code> 添加。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">packages/views/</div>
+            <code class="lpath">业务组件</code>
+          </div>
+          <div class="ldesc">页面与业务组件,web/desktop 共享。禁止 next/* 与 react-router-dom,通过 NavigationAdapter 路由。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">packages/tsconfig/ · eslint-config/</div>
+            <code class="lpath">规范配置</code>
+          </div>
+          <div class="ldesc">共享 TypeScript / ESLint 配置,所有包扩展自这里。</div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">e2e/</div>
+            <code class="lpath">Playwright</code>
+          </div>
+          <div class="ldesc">真实浏览器 + 真实后端的端到端测试,带 TestApiClient 夹具。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BACKEND -->
+    <section id="backend">
+      <h2>Go 后端结构</h2>
+      <div class="two-col">
+        <div class="card">
+          <div class="title">cmd/ <span class="tag">入口</span></div>
+          <ul>
+            <li><code>server/</code> — HTTP + WS 服务进程(:8080)</li>
+            <li><code>multica/</code> — Cobra CLI(login / daemon / issue / agent ...)</li>
+            <li><code>migrate/</code> — 双向迁移工具</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">internal/handler/ <span class="tag">路由处理</span></div>
+          <ul>
+            <li>每个领域一个文件:<code>issue.go · agent.go · chat.go · autopilot.go · skill.go · runtime.go ...</code></li>
+            <li>UUID 解析必走 loader 或 <code>parseUUIDOrBadRequest</code></li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">internal/realtime/ <span class="tag">WebSocket</span></div>
+          <ul>
+            <li>Hub 广播业务事件,失败时通过 Redis Streams 多节点分片中继</li>
+            <li>模式可配:<code>sharded · dual · legacy</code></li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">internal/daemonws/ <span class="tag">Daemon 通道</span></div>
+          <ul>
+            <li>与本地 daemon 的双向 WS:心跳调度 / 任务唤醒 / 进度上报</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">internal/auth · middleware <span class="tag">鉴权</span></div>
+          <ul>
+            <li>JWT + Cookie + PAT(带 Redis 缓存)</li>
+            <li>Daemon Token(<code>mdt_</code>)与用户 Token(<code>mul_</code>)双路</li>
+            <li>CloudFront 私有媒体签名 cookie</li>
+            <li>基于 Redis 的 IP 限流(<code>RATE_LIMIT_*</code>)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">pkg/db/ <span class="tag">sqlc</span></div>
+          <ul>
+            <li><code>queries/*.sql</code> 是真源</li>
+            <li><code>generated/</code> 是产物 — 改 SQL 后跑 <code>make sqlc</code></li>
+            <li><code>migrations/</code> 80+ 次迁移,记录业务演化</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">pkg/agent/ <span class="tag">CLI 适配</span></div>
+          <ul>
+            <li>每个支持的 agent 一个文件:<code>claude · codex · copilot · cursor · gemini · hermes · kimi · kiro · openclaw · opencode · pi</code></li>
+            <li>统一 <code>models.go</code> 与 <code>version.go</code> 做能力发现 + 版本兼容</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">pkg/protocol/ <span class="tag">客户端契约</span></div>
+          <ul>
+            <li><code>events.go</code> — WebSocket 事件</li>
+            <li><code>messages.go</code> — daemon ↔ server 消息</li>
+            <li>前端 <code>core/types/events.ts</code> 必须与之对齐</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- CORE -->
+    <section id="core">
+      <h2>packages/core 核心</h2>
+      <p>每个领域(issues / inbox / chat / agents / runtimes / projects / squads / autopilots / pins / labels / skills ...)都遵循同一种结构:</p>
+      <div class="cmd">issues/
+  queries.ts        <span class="comment"># React Query queryOptions + key 工厂</span>
+  mutations.ts      <span class="comment"># 乐观更新</span>
+  ws-updaters.ts    <span class="comment"># WS 事件 → 缓存失效/补丁</span>
+  store.ts          <span class="comment"># Zustand 客户端状态(过滤、视图模式)</span>
+  config/           <span class="comment"># 状态枚举、优先级</span>
+  index.ts          <span class="comment"># 桶导出</span></div>
+      <div class="grid" style="margin-top: 12px;">
+        <div class="card">
+          <div class="title">api/client.ts</div>
+          <p>唯一 ApiClient,所有方法返回经 zod schema 校验的数据。响应字段漂移不会让 UI 白屏。</p>
+        </div>
+        <div class="card">
+          <div class="title">api/ws-client.ts</div>
+          <p>自动重连 / 订阅 / 断线广播,服务于 realtime/provider。</p>
+        </div>
+        <div class="card">
+          <div class="title">platform/core-provider.tsx</div>
+          <p>一站式装载 ApiClient、stores、QueryClient、WS、I18n。Web/Desktop 都包它。</p>
+        </div>
+        <div class="card">
+          <div class="title">platform/workspace-storage.ts</div>
+          <p>当前工作区单例,通过 useSyncExternalStore 接驳。所有 wsId 都来源于此。</p>
+        </div>
+        <div class="card">
+          <div class="title">auth/store.ts</div>
+          <p>同时支持 token 模式(Electron)和 cookieAuth 模式(Web HttpOnly)。</p>
+        </div>
+        <div class="card">
+          <div class="title">realtime/provider.tsx</div>
+          <p>监听 WS 事件,触发对应 React Query 失效 — 永不直接写 store。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEWS / UI -->
+    <section id="views-ui">
+      <h2>packages/views & ui</h2>
+      <div class="two-col">
+        <div class="card">
+          <div class="title">packages/ui</div>
+          <p>shadcn 风格组件,运行在 <strong>Base UI</strong>(不是 Radix)。完整覆盖:</p>
+          <ul>
+            <li>alert / avatar / badge / button / card / chart</li>
+            <li>command / dialog / drawer / popover / select / sheet</li>
+            <li>sidebar / table / tabs / tooltip / sonner ...</li>
+          </ul>
+          <p style="margin-top: 8px;">添加新组件:<code>pnpm ui:add &lt;name&gt;</code></p>
+        </div>
+        <div class="card">
+          <div class="title">packages/views</div>
+          <p>按领域组织的业务组件 / 页面:</p>
+          <ul>
+            <li>agents · issues · inbox · chat · autopilots</li>
+            <li>runtimes · projects · skills · squads · settings</li>
+            <li>onboarding · workspace · auth · invite · search</li>
+            <li>layout(app-sidebar、dashboard-guard、page-header)</li>
+            <li>navigation(NavigationAdapter / AppLink)</li>
+            <li>locales/(en + zh-Hans 平行,parity 测试守护)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- APPS -->
+    <section id="apps">
+      <h2>前端应用入口</h2>
+      <div class="layers">
+        <div class="layer">
+          <div>
+            <div class="lname">apps/web</div>
+            <code class="lpath">Next.js App Router</code>
+          </div>
+          <div class="ldesc">
+            路由组:<code>(landing)</code>(营销/落地)· <code>(auth)</code>(login / onboarding / invite / 创建工作区)·
+            <code>[workspaceSlug]/(dashboard)</code>(agents / issues / inbox / projects / runtimes / squads / settings ...)。
+            cookieAuth 模式;唯一一处使用 next/navigation 的地方在 <code>apps/web/platform/</code>。
+          </div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">apps/desktop</div>
+            <code class="lpath">Electron + electron-vite</code>
+          </div>
+          <div class="ldesc">
+            <strong>多 tab 按工作区分组</strong>(<code>tab-store</code>)· <strong>WindowOverlay</strong> 取代"预工作区"路由(创建工作区、接受邀请不是路由)·
+            每 tab 一个 memory router(<code>WorkspaceRouteLayout</code>)· deep link 接 <code>multica://invite/...</code> 与 <code>multica://auth/callback</code>。
+          </div>
+        </div>
+        <div class="layer">
+          <div>
+            <div class="lname">apps/mobile</div>
+            <code class="lpath">Expo SDK 55 + RN 0.83</code>
+          </div>
+          <div class="ldesc">
+            独立技术栈,自己的 stores / hooks / API client / i18n。锁定 Expo 提供的 React 版本(滞后主线 6-12 个月)。
+            只通过 <code>import type</code> 复用 @multica/core 的类型。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATE MANAGEMENT -->
+    <section id="state">
+      <h2>状态管理铁律</h2>
+      <table>
+        <thead>
+          <tr><th>关注点</th><th>归属</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>服务端数据(issues / agents / inbox / workspaces)</td><td><strong>TanStack Query</strong> · 永不复制到 Zustand</td></tr>
+          <tr><td>客户端 UI 状态(过滤 / 草稿 / 模态 / 视图模式)</td><td><strong>Zustand</strong> · 只能放在 packages/core/</td></tr>
+          <tr><td>跨切面装配(workspaceId / navigation)</td><td>React Context</td></tr>
+          <tr><td>直接调 api.* 的权限</td><td>仅 auth store + workspace store</td></tr>
+        </tbody>
+      </table>
+      <ul class="rules" style="margin-top: 12px;">
+        <li class="ok"><span class="icon">✓</span><span><strong>WS 事件只触发 invalidate</strong>,绝不直接写 store(避免双源真相)</span></li>
+        <li class="ok"><span class="icon">✓</span><span><strong>workspace 作用域查询必须把 wsId 编进 key</strong>,切换工作区时缓存自动切换</span></li>
+        <li class="ok"><span class="icon">✓</span><span><strong>mutation 默认乐观</strong>,失败回滚,settle 时 invalidate</span></li>
+        <li class="danger"><span class="icon">✗</span><span>Zustand selector 返回新对象/数组会触发无限重渲染 — 选基础值或用 shallow 比较</span></li>
+      </ul>
+    </section>
+
+    <!-- BOUNDARIES -->
+    <section id="boundaries">
+      <h2>包边界(违反就是破坏架构)</h2>
+      <div class="arch">views/  ──>  core/  +  ui/        <span style="color: var(--success)">✓ 允许</span>
+
+core/   <span style="color: var(--destructive)">✗ 禁止</span>:react-dom · localStorage(用 StorageAdapter)· process.env · UI 库
+ui/     <span style="color: var(--destructive)">✗ 禁止</span>:@multica/core · 任何业务逻辑
+views/  <span style="color: var(--destructive)">✗ 禁止</span>:next/* · react-router-dom · stores(stores 都在 core/)
+
+apps/web/platform/                       唯一允许使用 next/navigation 的地方
+apps/desktop/.../platform/               唯一允许使用 react-router-dom 的地方</div>
+      <ul class="rules" style="margin-top: 12px;">
+        <li><span class="icon">!</span><span><strong>No-Duplication Rule</strong>:web 与 desktop 出现两份相同逻辑必须提到共享包,差异点用 <code>props</code> 槽位(<code>extra</code> / <code>topSlot</code>)</span></li>
+        <li><span class="icon">!</span><span><strong>新增页面/功能</strong>:组件放 <code>packages/views/&lt;domain&gt;/</code>,web 加 Next.js 路由,desktop 加 router 或 WindowOverlay</span></li>
+        <li><span class="icon">!</span><span><strong>新增 hook 需要 wsId</strong>:接受 <code>wsId</code> 作为参数(而不是内部读 Context),让它在 WorkspaceIdProvider 之外也能用</span></li>
+      </ul>
+    </section>
+
+    <!-- API CONTRACT -->
+    <section id="api-contract">
+      <h2>API 响应契约(装机版前端的唯一防线)</h2>
+      <p>桌面版客户端会比服务端旧 N 个版本 — 用户在 0.2.x 上访问 0.4.x 后端。每个响应字段都是会漂移的合同。已经发生过 #2143 / #2147 / #2192 三次事故。</p>
+      <ul class="rules">
+        <li class="ok"><span class="icon">✓</span><span><strong>parse, don't cast</strong>:用 <code>parseWithFallback</code>(packages/core/api/schema.ts)+ zod schema + 显式 fallback,失败只 warn,不 throw 进 UI</span></li>
+        <li class="danger"><span class="icon">✗</span><span><strong>禁止裸 <code>as</code></strong>:任何会被 UI 消费的响应必须过 schema</span></li>
+        <li class="ok"><span class="icon">✓</span><span><strong>下游全部可选链 + 默认值</strong>:每个字段都按可能缺失处理,布尔用 <code>=== true</code> 而非真值判断</span></li>
+        <li class="ok"><span class="icon">✓</span><span><strong>UI 不绑定单字段</strong>:按钮 / 指示灯不能依赖单个布尔,需组合多信号</span></li>
+        <li class="ok"><span class="icon">✓</span><span><strong>Enum 漂移要降级而非崩溃</strong>:server-driven 的 <code>switch</code> 必须有 <code>default</code></span></li>
+        <li><span class="icon">!</span><span><strong>新增/修改 endpoint</strong>:同 PR 加 schema + 至少一个用畸形响应(缺字段、错类型、null 数组)的测试</span></li>
+      </ul>
+    </section>
+
+    <!-- COMMANDS -->
+    <section id="commands">
+      <h2>常用命令</h2>
+      <div class="two-col">
+        <div>
+          <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px;">一键启动</h3>
+          <div class="cmd">make dev              <span class="comment"># 自动:env、deps、Postgres、迁移、启动</span>
+make setup            <span class="comment"># 仅准备环境</span>
+make start            <span class="comment"># 启动 backend + frontend</span>
+make stop             <span class="comment"># 停止当前 checkout 的应用进程</span>
+make check            <span class="comment"># 全量校验:typecheck + tests + e2e</span></div>
+        </div>
+        <div>
+          <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px;">前端 (Turborepo)</h3>
+          <div class="cmd">pnpm dev:web          <span class="comment"># Next.js (3000)</span>
+pnpm dev:desktop      <span class="comment"># Electron + HMR</span>
+pnpm typecheck        <span class="comment"># 全包 TS 检查</span>
+pnpm test             <span class="comment"># 全包 Vitest</span>
+pnpm lint
+pnpm ui:add &lt;name&gt;     <span class="comment"># 加 shadcn 组件</span></div>
+        </div>
+        <div>
+          <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px;">后端 (Go)</h3>
+          <div class="cmd">make server           <span class="comment"># Go server 单跑 (:8080)</span>
+make daemon           <span class="comment"># 本地 daemon</span>
+make sqlc             <span class="comment"># 改完 SQL 重新生成</span>
+make migrate-up
+make test             <span class="comment"># Go tests</span>
+make cli ARGS="config" <span class="comment"># 执行 CLI 子命令</span></div>
+        </div>
+        <div>
+          <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px;">单测 / E2E</h3>
+          <div class="cmd"><span class="comment"># TS 单测</span>
+pnpm --filter @multica/views exec vitest run auth/login-page.test.tsx
+<span class="comment"># Go 单测</span>
+cd server && go test ./internal/handler/ -run TestName
+<span class="comment"># Playwright</span>
+pnpm exec playwright test e2e/issues.spec.ts</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features">
+      <h2>业务模块速查</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="title">Workspace 工作区</div>
+          <p>顶层隔离单位,各自的 agents / issues / settings / runtimes / 成员。slug-routed,有保留字列表。</p>
+        </div>
+        <div class="card">
+          <div class="title">Issue 议题</div>
+          <p>核心实体:状态机、优先级、assignee(人或 agent)、subscriber、reactions、attachments、labels、子 issue、metadata、关联 PR。</p>
+        </div>
+        <div class="card">
+          <div class="title">Project 项目</div>
+          <p>Issue 之上的容器,带 Gantt 视图、资源链接、leader、状态。</p>
+        </div>
+        <div class="card">
+          <div class="title">Agent 智能体</div>
+          <p>Profile · 模型 · 思考深度 · 可用 skill · runtime 绑定 · 并发数 · 自定义参数 / 环境变量。从模板创建一键带 skill。</p>
+        </div>
+        <div class="card">
+          <div class="title">Runtime + Daemon</div>
+          <p>Runtime = 能跑 agent 的环境(本地 daemon 或云节点)。daemon 自动发现 PATH 上的 CLI,支持云 fleet 代理。</p>
+        </div>
+        <div class="card">
+          <div class="title">Skill 技能</div>
+          <p>多文件结构的可复用方案。可从本地 runtime 导入,可被多个 agent 引用。</p>
+        </div>
+        <div class="card">
+          <div class="title">Autopilot 自动驾驶</div>
+          <p>定时 / Webhook 触发 agent。带 deliveries 重放、签名密钥轮换。</p>
+        </div>
+        <div class="card">
+          <div class="title">Chat 对话</div>
+          <p>跨 issue 的对话会话,挂起任务流,支持 attachments 与 mentions。</p>
+        </div>
+        <div class="card">
+          <div class="title">Inbox 收件箱</div>
+          <p>提及 / 状态变更 / 任务完成的通知聚合。批量已读 / 归档。</p>
+        </div>
+        <div class="card">
+          <div class="title">Squad 小队</div>
+          <p>leader agent 路由的"团队级"分配:<code>@FrontendTeam</code> 而非单个 agent。</p>
+        </div>
+        <div class="card">
+          <div class="title">Search 搜索</div>
+          <p>全工作区命令面板,按 issue / project / agent / skill 检索。</p>
+        </div>
+        <div class="card">
+          <div class="title">Settings · GitHub · PAT</div>
+          <p>账户、工作区、成员、Tokens、GitHub App 集成、通知偏好、实验性功能。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- REFERENCES -->
+    <section id="refs">
+      <h2>扩展阅读</h2>
+      <div class="two-col">
+        <div class="card">
+          <div class="title">权威文档</div>
+          <ul>
+            <li><a href="../CLAUDE.md">CLAUDE.md</a> · 架构铁律的真源</li>
+            <li><a href="../README.md">README.md</a> · 用户视角入门</li>
+            <li><a href="../CONTRIBUTING.md">CONTRIBUTING.md</a> · 开发流程</li>
+            <li><a href="../SELF_HOSTING.md">SELF_HOSTING.md</a> · 自托管</li>
+            <li><a href="../CLI_AND_DAEMON.md">CLI_AND_DAEMON.md</a> · CLI/daemon 命令</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">设计 & 产品</div>
+          <ul>
+            <li><a href="./design.md">docs/design.md</a> · 完整设计系统</li>
+            <li><a href="./product-overview.md">docs/product-overview.md</a> · 产品全景</li>
+            <li><a href="./analytics.md">docs/analytics.md</a> · 埋点</li>
+            <li><a href="./timezone-architecture-rfc.md">docs/timezone-architecture-rfc.md</a></li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">关键代码入口</div>
+          <ul>
+            <li><code>server/cmd/server/router.go</code> · 全部路由</li>
+            <li><code>packages/core/api/client.ts</code> · API 客户端</li>
+            <li><code>packages/core/platform/core-provider.tsx</code> · 应用启动装配</li>
+            <li><code>apps/web/app/layout.tsx</code> · Next.js 根布局</li>
+            <li><code>apps/desktop/src/renderer/src/App.tsx</code> · Electron 渲染入口</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="title">协议契约</div>
+          <ul>
+            <li><code>server/pkg/protocol/events.go</code> · WS 事件</li>
+            <li><code>server/pkg/protocol/messages.go</code> · daemon 消息</li>
+            <li><code>packages/core/types/events.ts</code> · 前端镜像</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      Multica · 开源 AI-native 任务管理平台 · 本页面是单文件 HTML 项目速览,基于 monorepo 系统调研生成。
+    </footer>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>调研 · 飞书 MeeGo → Multica 迁移可行性</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand-row">
+      <div class="brand-mark">M→M</div>
+      <div>
+        <div class="brand-name">迁移调研</div>
+      </div>
+    </div>
+    <div class="brand-meta">飞书 MeeGo → Multica</div>
+
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="nav-label">背景</div>
+        <a href="#summary">执行摘要</a>
+        <a href="#meego">飞书 MeeGo 是什么</a>
+        <a href="#multica">Multica 是什么</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">对比</div>
+        <a href="#concept-map">概念映射</a>
+        <a href="#capability">能力差距矩阵</a>
+        <a href="#data-model">数据模型对比</a>
+        <a href="#philosophy">设计哲学差异</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">迁移</div>
+        <a href="#decision">迁移决策树</a>
+        <a href="#phases">五阶段路线图</a>
+        <a href="#data-pipeline">数据迁移管道</a>
+        <a href="#dev-tasks">研发改造任务</a>
+        <a href="#risks">风险与对策</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">附录</div>
+        <a href="#open-questions">公司侧待确认问题</a>
+        <a href="#references">参考资料</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="breadcrumb">
+      <a href="../overview.html">项目速览</a>
+      <span>›</span>
+      <span>调研:飞书 MeeGo → Multica 迁移</span>
+    </div>
+
+    <div class="title-block">
+      <h1>飞书 MeeGo → Multica 迁移可行性调研</h1>
+      <div class="meta">文档版本 v0.1 · 基于 multica 当前 main 分支 + MeeGo 公开文档(2024-2025)</div>
+      <p class="lede">
+        这份文档回答三个问题:<strong>(1)飞书 MeeGo 与 Multica 各自是什么?(2)它们之间真正的差异在哪里?
+        (3)如果要把公司从 MeeGo 整体搬到 Multica,需要分几步、做哪些事、有哪些坑必须先解决?</strong>
+        结论先放在这里:<em>能迁,但 Multica 的产品形态与 MeeGo 不是同一类工具</em>,需要做"<strong>能力补齐 + 工作流改造</strong>"两件事才有可能落地,
+        而非单纯"导出导入"的数据搬运。
+      </p>
+      <div class="badges">
+        <span class="badge meego">来源:飞书 MeeGo / 飞书项目(Meegle)</span>
+        <span class="badge multica">目标:Multica self-host</span>
+        <span class="badge warn">能力差距:大</span>
+        <span class="badge ok">可行性:中-高(需取舍)</span>
+      </div>
+    </div>
+
+    <!-- ============ EXECUTIVE SUMMARY ============ -->
+    <section id="summary">
+      <h2>执行摘要(给决策者)</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>三句话结论</h4>
+          <ul>
+            <li>MeeGo 是<strong>低代码 ALM 平台</strong>(像 Jira + 飞书集成),Multica 是<strong>AI-native 任务平台</strong>(像 Linear + Agent)。</li>
+            <li>核心数据(Issue / Project / 评论 / 附件)可迁;<strong>表单 + 流程引擎</strong>是 Multica 当前没有的能力,迁移前要先补。</li>
+            <li>建议<strong>分批迁移</strong>:先迁研发类工作项(需求、缺陷),再迁项目级管理,最后处理度量与审批类。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4>预期收益 vs 代价</h4>
+          <ul>
+            <li><strong>收益</strong>:Agent 一等公民、实时协作体验、私有化部署、源代码可控、年成本可大幅下降。</li>
+            <li><strong>代价</strong>:需补开发表单/流程引擎、自定义字段、度量与报表;迁移期成员需要重新培训。</li>
+            <li><strong>不建议直接全量切换</strong>:先用 6-8 周搭"双轨期",新业务上 Multica,老业务在 MeeGo 收尾。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warn">
+        <p class="callout-title">⚠ 一个关键事实必须先讲清楚</p>
+        <p class="callout-body">
+          MeeGo 的核心竞争力是<strong>"工作项 + 流程节点 + 字段权限"的可配置化组合</strong> —— 公司里 PMO/SQA 已经在 MeeGo 上沉淀了大量流程模板。
+          Multica 当前没有可配置流程引擎(<code>issue.status</code> 是固定枚举,只能在代码里加新值),
+          这意味着<strong>简单平移会丢掉 MeeGo 的关键能力</strong>。要么先在 Multica 上做流程引擎扩展,要么把 MeeGo 流程"扁平化"成 Multica 的 label/project,二选一。
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ MEEGO ============ -->
+    <section id="meego">
+      <h2>飞书 MeeGo / 飞书项目(Meegle)是什么</h2>
+      <p>飞书 MeeGo(后改名 <strong>飞书项目 / Meegle</strong>)是字节跳动内部使用、外部商业化的<strong>研发协作 + 项目管理平台</strong>,定位接近 Jira + Linear + ServiceNow 的子集,
+      与飞书生态深度绑定(IM 通知、文档、审批、人员体系)。</p>
+
+      <h3>核心数据模型</h3>
+      <pre>Tenant(租户)
+  └─ Space(空间)<span class="c">                — 类比 Jira 的 Project</span>
+       ├─ WorkItemType(工作项类型)<span class="c">  — "需求 / 缺陷 / 任务" 等可自定义</span>
+       │    ├─ Field[]<span class="c">             — 可配置字段(20+ 字段类型,支持公式、关联、附件)</span>
+       │    ├─ Workflow / Stateflow<span class="c">— 双流程模式:节点流 / 状态流</span>
+       │    │    ├─ Node[]<span class="c">         — 节点 = 阶段,带必填字段、负责人、SLA</span>
+       │    │    └─ Transition[]<span class="c">   — 流转规则、驳回、并行/串行</span>
+       │    └─ View[]<span class="c">              — 列表 / 看板 / 甘特 / 自定义视图</span>
+       ├─ WorkItem 实例
+       │    ├─ FieldValue[]<span class="c">        — 一个工作项一行字段值</span>
+       │    ├─ Subtask[]
+       │    ├─ Comment / Reply
+       │    ├─ Attachment
+       │    ├─ Activity Log<span class="c">         — 全量审计日志,字段级</span>
+       │    └─ Reviews / Approvals<span class="c">  — 评审 / 审批工单</span>
+       └─ Role / Permission<span class="c">         — 角色 / 字段级权限 / 节点级操作权限</span></pre>
+
+      <h3>关键能力清单</h3>
+      <table>
+        <thead><tr><th style="width: 130px">类别</th><th>能力</th></tr></thead>
+        <tbody>
+          <tr><td>流程引擎</td><td>双流程(节点流 + 状态流)、节点必填字段、阶段负责人、超时规则、节点驳回、自动化触发</td></tr>
+          <tr><td>字段引擎</td><td>20+ 字段类型(单/多选、人员、日期、公式、关联工作项、富文本、附件、API 字段)、字段权限(读/写/可见性)、对接标识(<code>field_alias</code>)</td></tr>
+          <tr><td>视图</td><td>列表 / 看板 / 甘特(WBS) / 仪表盘;支持视图共享、过滤器</td></tr>
+          <tr><td>关联</td><td>工作项之间多种关联类型(阻塞、复制、关联);工作项与代码 PR/MR、上线单关联</td></tr>
+          <tr><td>度量</td><td>燃尽图、累积流图、阶段时长、缺陷收敛、自定义度量看板</td></tr>
+          <tr><td>评审/审批</td><td>独立的评审单、审批工单(走飞书审批引擎)</td></tr>
+          <tr><td>权限模型</td><td>角色(团队角色+空间角色) × 字段级 × 节点级 × 视图级,可配置矩阵</td></tr>
+          <tr><td>集成</td><td>飞书 IM/文档/日历/审批 一体;OpenAPI(Go/Python SDK);三方 webhook 触发器</td></tr>
+          <tr><td>OpenAPI</td><td><code>app_id/app_secret</code> 获 plugin_token + <code>user_key</code> 模拟用户身份;有 work_item / workflow / chat / field 全套读写 API</td></tr>
+          <tr><td>AI 能力</td><td>"飞项 AI"提供工单写作、规划辅助;非 agent-as-teammate 模式</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ MULTICA ============ -->
+    <section id="multica">
+      <h2>Multica 是什么(简版,详见 <a href="../overview.html">overview</a>)</h2>
+      <p>Multica 是<strong>开源、AI-native</strong> 的任务管理平台,产品哲学接近 <em>Linear + Cursor 的混合体</em>。最大差异点:</p>
+      <ul>
+        <li>Agent 是一等公民:被指派、留评论、报阻塞、改状态。Squad/Skill/Autopilot/Runtime 都围绕"如何让 AI 干活"展开。</li>
+        <li>核心数据模型<strong>固定且收敛</strong>:Workspace → Issue/Project/Agent/Squad/Skill/Runtime + 关系(label / pin / subscriber)。</li>
+        <li>状态机用 Go 枚举写死,通过迁移演化(80+ 次 SQL 迁移),<strong>用户不能配置新状态</strong>。</li>
+        <li>极强的实时性(WS + Redis 中继),装机版前端,API 防御边界。</li>
+        <li>自托管友好,Postgres + Redis + S3 兜底,可单机起步。</li>
+      </ul>
+    </section>
+
+    <!-- ============ CONCEPT MAP ============ -->
+    <section id="concept-map">
+      <h2>概念映射(MeeGo → Multica)</h2>
+      <p>这一节是<strong>整个迁移的字典</strong>。研发同学读完这张表,基本能在脑里完成 mental model 的转换。</p>
+
+      <table>
+        <thead>
+          <tr><th>MeeGo 概念</th><th>Multica 对应</th><th>映射状态</th><th>注释</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="cell-meego">租户 / Tenant</td><td class="cell-multica">部署实例(self-host)</td><td><span class="tick-ok">直接对应</span></td><td>1 个公司部署 1 个 Multica 实例</td></tr>
+          <tr><td class="cell-meego">空间 / Space</td><td class="cell-multica">Workspace</td><td><span class="tick-ok">直接对应</span></td><td>都是隔离单位,有成员、设置</td></tr>
+          <tr><td class="cell-meego">工作项类型</td><td class="cell-multica">Issue + label/project</td><td><span class="tick-warn">部分对应</span></td><td>Multica 只有 issue 一种实体,差异要靠 label/project 表达</td></tr>
+          <tr><td class="cell-meego">字段(Field)</td><td class="cell-multica">issue.metadata(JSONB)</td><td><span class="tick-warn">需开发</span></td><td>Multica 没有 schema 化字段;<strong>需要自建</strong></td></tr>
+          <tr><td class="cell-meego">节点流(Workflow)</td><td class="cell-multica">issue.status 枚举</td><td><span class="tick-no">没有</span></td><td>Multica 没有可配置流程引擎</td></tr>
+          <tr><td class="cell-meego">视图 / WBS / 甘特</td><td class="cell-multica">issues 页 + projects 页</td><td><span class="tick-warn">部分对应</span></td><td>列表 + 看板 OK,甘特/WBS 需补</td></tr>
+          <tr><td class="cell-meego">子任务</td><td class="cell-multica">parent_issue_id</td><td><span class="tick-ok">直接对应</span></td><td>Multica 支持 issue 父子关系</td></tr>
+          <tr><td class="cell-meego">评论</td><td class="cell-multica">issue.comments</td><td><span class="tick-ok">直接对应</span></td><td>都支持 mention</td></tr>
+          <tr><td class="cell-meego">附件</td><td class="cell-multica">attachments(S3)</td><td><span class="tick-ok">直接对应</span></td><td>需重传到 S3</td></tr>
+          <tr><td class="cell-meego">关联(blocked_by 等)</td><td class="cell-multica">issue 关联表</td><td><span class="tick-warn">部分对应</span></td><td>Multica 关联类型较少,需扩展</td></tr>
+          <tr><td class="cell-meego">评审 / 审批</td><td class="cell-multica">无</td><td><span class="tick-no">没有</span></td><td>需要外接飞书审批 / 自研</td></tr>
+          <tr><td class="cell-meego">度量 / 报表</td><td class="cell-multica">dashboard(轻量)</td><td><span class="tick-warn">差距大</span></td><td>Multica dashboard 模块尚浅</td></tr>
+          <tr><td class="cell-meego">角色 / 字段级权限</td><td class="cell-multica">workspace role(owner/admin/member)</td><td><span class="tick-warn">差距大</span></td><td>Multica 只有 3 级 RBAC,无字段级</td></tr>
+          <tr><td class="cell-meego">自动化连接器</td><td class="cell-multica">Autopilot</td><td><span class="tick-ok">理念对应</span></td><td>但 Multica Autopilot 偏向 agent 触发,不是流程驱动</td></tr>
+          <tr><td class="cell-meego">飞项 AI 写作</td><td class="cell-multica">Agent + Skill</td><td><span class="tick-ok">Multica 强项</span></td><td>Multica 在这一项明显更强</td></tr>
+          <tr><td class="cell-meego">飞书 IM 通知</td><td class="cell-multica">in-app inbox + email</td><td><span class="tick-warn">需扩展</span></td><td>需要写一个飞书 webhook bridge</td></tr>
+          <tr><td class="cell-meego">OpenAPI</td><td class="cell-multica">REST API + PAT</td><td><span class="tick-ok">对应</span></td><td>Multica 有 PAT,接口形态简单</td></tr>
+          <tr><td class="cell-meego">活动日志</td><td class="cell-multica">events 表</td><td><span class="tick-warn">部分对应</span></td><td>Multica 不是字段级 audit,粒度较粗</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ CAPABILITY MATRIX ============ -->
+    <section id="capability">
+      <h2>能力差距矩阵</h2>
+      <p>横轴是公司日常用 MeeGo 的典型能力,纵轴是 Multica 的当前覆盖度:</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 200px">能力</th>
+            <th>MeeGo</th>
+            <th>Multica 当前</th>
+            <th>差距评级</th>
+            <th>补齐工作量</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>多类型工作项</td><td><span class="tick-ok">★★★★★</span></td><td><span class="tick-mid">★★☆☆☆</span></td><td>大</td><td>需在 issue 上叠加 type + custom fields</td></tr>
+          <tr><td>自定义字段(20+ 类型)</td><td><span class="tick-ok">★★★★★</span></td><td><span class="tick-no">★☆☆☆☆</span></td><td>巨大</td><td>需新建 field_definition + field_value 表 + UI</td></tr>
+          <tr><td>可配置流程</td><td><span class="tick-ok">★★★★★</span></td><td><span class="tick-no">☆☆☆☆☆</span></td><td>巨大</td><td>设计流程引擎(状态机 DSL + 校验 + UI)</td></tr>
+          <tr><td>字段级权限</td><td><span class="tick-ok">★★★★☆</span></td><td><span class="tick-no">☆☆☆☆☆</span></td><td>巨大</td><td>需要 ABAC,不是当前 RBAC 能扩的</td></tr>
+          <tr><td>WBS / 甘特</td><td><span class="tick-ok">★★★★☆</span></td><td><span class="tick-mid">★★☆☆☆</span></td><td>中</td><td>项目页有部分 Gantt,但缺关键路径与 baseline</td></tr>
+          <tr><td>看板 / 列表 / 过滤</td><td><span class="tick-ok">★★★★★</span></td><td><span class="tick-ok">★★★★☆</span></td><td>小</td><td>Multica 已具备,体验更现代</td></tr>
+          <tr><td>关联工作项</td><td><span class="tick-ok">★★★★☆</span></td><td><span class="tick-mid">★★★☆☆</span></td><td>中</td><td>关联类型需扩枚举</td></tr>
+          <tr><td>评审 / 审批</td><td><span class="tick-ok">★★★★☆</span></td><td><span class="tick-no">☆☆☆☆☆</span></td><td>巨大</td><td>建议沿用飞书审批,只在 Multica 里展示状态</td></tr>
+          <tr><td>报表 / 度量</td><td><span class="tick-ok">★★★★☆</span></td><td><span class="tick-mid">★★☆☆☆</span></td><td>中-大</td><td>dashboard 模块尚浅;需要更多预置图表</td></tr>
+          <tr><td>飞书集成</td><td><span class="tick-ok">★★★★★</span></td><td><span class="tick-no">☆☆☆☆☆</span></td><td>大</td><td>需要写飞书 bridge:IM/审批/SSO</td></tr>
+          <tr><td>SSO</td><td><span class="tick-ok">★★★★☆</span></td><td><span class="tick-mid">★★★☆☆</span></td><td>小-中</td><td>Multica 有 Google OAuth + 邮箱码,需补飞书 SSO</td></tr>
+          <tr><td>i18n</td><td><span class="tick-ok">★★★★☆</span></td><td><span class="tick-ok">★★★★☆</span></td><td>无</td><td>双方都齐</td></tr>
+          <tr><td>实时协作 / WS</td><td><span class="tick-mid">★★★☆☆</span></td><td><span class="tick-ok">★★★★★</span></td><td>反向优势</td><td>Multica 更强(秒级、跨标签同步)</td></tr>
+          <tr><td>AI Agent 一等公民</td><td><span class="tick-no">☆☆☆☆☆</span></td><td><span class="tick-ok">★★★★★</span></td><td>反向优势</td><td>Multica 的核心卖点</td></tr>
+          <tr><td>本地 daemon / CLI</td><td><span class="tick-no">☆☆☆☆☆</span></td><td><span class="tick-ok">★★★★★</span></td><td>反向优势</td><td>本地跑 Claude/Codex</td></tr>
+          <tr><td>自托管 / 数据私有</td><td><span class="tick-no">☆☆☆☆☆</span></td><td><span class="tick-ok">★★★★★</span></td><td>反向优势</td><td>多数公司迁移的主要诉求</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <p class="callout-title">读这张表的方式</p>
+        <p class="callout-body">
+          上半部分(<strong>差距大</strong>)是 Multica 必须先补的能力;下半部分(<strong>反向优势</strong>)是 Multica 的核心卖点,迁移之后会获得提升。
+          所以不是"是否要迁",而是"补齐到什么程度算够、用什么策略补"。
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ DATA MODEL ============ -->
+    <section id="data-model">
+      <h2>数据模型对比图</h2>
+      <figure class="figure">
+        <svg viewBox="0 0 920 480" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="11">
+          <defs>
+            <marker id="rel" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+            </marker>
+          </defs>
+
+          <!-- Title bars -->
+          <rect x="20" y="10" width="430" height="28" rx="6" fill="#00d6b9" />
+          <text x="235" y="29" fill="#fff" text-anchor="middle" font-weight="600" font-size="13">飞书 MeeGo 数据模型</text>
+          <rect x="470" y="10" width="430" height="28" rx="6" fill="#6366f1" />
+          <text x="685" y="29" fill="#fff" text-anchor="middle" font-weight="600" font-size="13">Multica 数据模型</text>
+
+          <!-- MeeGo side -->
+          <rect x="40" y="55" width="180" height="40" rx="6" class="svg-fill-surface" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="130" y="78" text-anchor="middle" font-weight="600">Tenant</text>
+
+          <rect x="40" y="115" width="180" height="40" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="130" y="138" text-anchor="middle" font-weight="600">Space</text>
+
+          <rect x="40" y="175" width="180" height="60" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="130" y="198" text-anchor="middle" font-weight="600">WorkItemType</text>
+          <text x="130" y="216" text-anchor="middle" fill="#71717a" font-size="10">+ Field[] + Workflow + View[]</text>
+
+          <rect x="40" y="255" width="180" height="60" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="130" y="278" text-anchor="middle" font-weight="600">WorkItem</text>
+          <text x="130" y="296" text-anchor="middle" fill="#71717a" font-size="10">+ FieldValue[] + Subtask + ...</text>
+
+          <rect x="240" y="115" width="190" height="40" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="335" y="138" text-anchor="middle">Role / Permission</text>
+
+          <rect x="240" y="175" width="190" height="40" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="335" y="198" text-anchor="middle">Workflow Node / Stateflow</text>
+
+          <rect x="240" y="235" width="190" height="40" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="335" y="258" text-anchor="middle">Field(20+ types)</text>
+
+          <rect x="240" y="295" width="190" height="40" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="335" y="318" text-anchor="middle">View / 仪表盘 / 度量</text>
+
+          <rect x="240" y="355" width="190" height="40" rx="6" stroke="#00d6b9" stroke-width="1.5" fill="#fff" />
+          <text x="335" y="378" text-anchor="middle">Review / Approval</text>
+
+          <line x1="130" y1="95" x2="130" y2="115" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="130" y1="155" x2="130" y2="175" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="130" y1="235" x2="130" y2="255" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="220" y1="135" x2="240" y2="135" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="220" y1="195" x2="240" y2="195" stroke="#a1a1aa" marker-end="url(#rel)" />
+
+          <!-- Multica side -->
+          <rect x="490" y="55" width="180" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="580" y="78" text-anchor="middle" font-weight="600">Deployment</text>
+
+          <rect x="490" y="115" width="180" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="580" y="138" text-anchor="middle" font-weight="600">Workspace</text>
+
+          <rect x="490" y="175" width="180" height="60" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="580" y="198" text-anchor="middle" font-weight="600">Issue (single type)</text>
+          <text x="580" y="216" text-anchor="middle" fill="#71717a" font-size="10">status enum · metadata JSONB</text>
+
+          <rect x="490" y="255" width="180" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="580" y="278" text-anchor="middle">Project / Label</text>
+
+          <rect x="690" y="115" width="190" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="785" y="138" text-anchor="middle">Member (RBAC 3 级)</text>
+
+          <rect x="690" y="175" width="190" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="785" y="198" text-anchor="middle">Agent / Squad / Skill</text>
+
+          <rect x="690" y="235" width="190" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="785" y="258" text-anchor="middle">Runtime / Daemon</text>
+
+          <rect x="690" y="295" width="190" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="785" y="318" text-anchor="middle">Autopilot</text>
+
+          <rect x="690" y="355" width="190" height="40" rx="6" stroke="#6366f1" stroke-width="1.5" fill="#fff" />
+          <text x="785" y="378" text-anchor="middle">Inbox / Chat</text>
+
+          <line x1="580" y1="95" x2="580" y2="115" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="580" y1="155" x2="580" y2="175" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="580" y1="235" x2="580" y2="255" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="670" y1="135" x2="690" y2="135" stroke="#a1a1aa" marker-end="url(#rel)" />
+          <line x1="670" y1="195" x2="690" y2="195" stroke="#a1a1aa" marker-end="url(#rel)" />
+
+          <!-- divider -->
+          <line x1="460" y1="50" x2="460" y2="430" stroke="#e4e4e7" stroke-dasharray="4 4" />
+
+          <!-- bottom note -->
+          <text x="235" y="450" text-anchor="middle" fill="#71717a" font-size="11">强:可配置类型/字段/流程/权限矩阵</text>
+          <text x="235" y="466" text-anchor="middle" fill="#71717a" font-size="11">弱:AI agent / 实时性 / 自托管</text>
+
+          <text x="685" y="450" text-anchor="middle" fill="#71717a" font-size="11">强:Agent / 实时性 / 自托管 / DX</text>
+          <text x="685" y="466" text-anchor="middle" fill="#71717a" font-size="11">弱:可配置流程 / 字段 / 字段级权限</text>
+        </svg>
+        <figcaption>图 1 · 两边都是 4 层结构,但 MeeGo 的"配置层"在 Multica 里被压缩成"代码层"</figcaption>
+      </figure>
+
+      <p class="muted">关键洞察:MeeGo 让<strong>业务管理员通过配置改变系统</strong>,Multica 让<strong>开发者通过修改代码改变系统</strong>。
+      这种范式差异决定了迁移不是数据搬运,而是"<em>把业务表达从配置语言重新编码到代码语言</em>"。</p>
+    </section>
+
+    <!-- ============ PHILOSOPHY ============ -->
+    <section id="philosophy">
+      <h2>设计哲学的根本差异</h2>
+      <div class="grid-2">
+        <div class="card meego">
+          <h4>飞书 MeeGo:配置驱动的 ALM 平台</h4>
+          <ul>
+            <li>用户群:PMO、SQA、流程工程师 + 研发</li>
+            <li>价值主张:"把公司流程沉淀到工具里"</li>
+            <li>扩展方式:管理员在 UI 里点配置 → 立即生效</li>
+            <li>数据假设:同一个空间里 N 种工作项,每种工作项有独立 schema</li>
+            <li>权限假设:角色 × 字段 × 节点的高维矩阵,适配大公司</li>
+            <li>AI 形态:辅助工具(写作、规划)</li>
+          </ul>
+        </div>
+        <div class="card multica">
+          <h4>Multica:代码驱动的 AI-native 平台</h4>
+          <ul>
+            <li>用户群:研发团队、独立开发者、SaaS 公司</li>
+            <li>价值主张:"让 AI 和人共用同一个看板"</li>
+            <li>扩展方式:开发者改源码 + DB migration</li>
+            <li>数据假设:Issue 是核心,所有差异化用 label / project / metadata 表达</li>
+            <li>权限假设:工作区 RBAC 3 级,简单清晰</li>
+            <li>AI 形态:Agent 是一等公民,有 profile/被指派/留言</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout warn">
+        <p class="callout-title">这个差异对迁移意味着什么</p>
+        <p class="callout-body">
+          公司在 MeeGo 里搭的"5 种工作项 × 12 个流程节点 × 80+ 自定义字段"<strong>不是数据,是业务定义</strong>。
+          直接迁过来,你会发现 Multica 没有承载它们的容器。<strong>正确做法是先做"流程提炼" —— 把 80% 高频用到的部分提炼出来,在 Multica 上以代码形式实现;余下 20% 长尾流程接受重构或废弃。</strong>
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ DECISION TREE ============ -->
+    <section id="decision">
+      <h2>迁移决策树:你应该现在迁吗?</h2>
+      <figure class="figure">
+        <svg viewBox="0 0 920 480" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="11">
+          <defs>
+            <marker id="dec" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+            </marker>
+          </defs>
+
+          <rect x="350" y="20" width="220" height="50" rx="10" fill="#6366f1" />
+          <text x="460" y="42" fill="#fff" text-anchor="middle" font-weight="600">是否要迁?</text>
+          <text x="460" y="58" fill="#fff" text-anchor="middle" font-size="10">从这里开始判断</text>
+
+          <!-- Q1 -->
+          <rect x="320" y="100" width="280" height="50" rx="10" fill="#fff" stroke="#3b82f6" stroke-width="1.5" />
+          <text x="460" y="122" text-anchor="middle" font-weight="600">公司核心诉求是什么?</text>
+          <text x="460" y="138" text-anchor="middle" fill="#71717a" font-size="10">数据私有化 / 成本 / AI 协作 / 还是流程沉淀?</text>
+          <line x1="460" y1="70" x2="460" y2="100" stroke="#a1a1aa" marker-end="url(#dec)" />
+
+          <!-- Branches -->
+          <rect x="20" y="190" width="220" height="60" rx="10" fill="#fff" stroke="#10b981" stroke-width="1.5" />
+          <text x="130" y="212" text-anchor="middle" font-weight="600">数据私有 / 成本</text>
+          <text x="130" y="230" text-anchor="middle" fill="#71717a" font-size="10">→ 强烈建议迁,这是 multica 的甜点</text>
+
+          <rect x="270" y="190" width="220" height="60" rx="10" fill="#fff" stroke="#10b981" stroke-width="1.5" />
+          <text x="380" y="212" text-anchor="middle" font-weight="600">AI 协作研发</text>
+          <text x="380" y="230" text-anchor="middle" fill="#71717a" font-size="10">→ 强烈建议迁,Multica 独占优势</text>
+
+          <rect x="520" y="190" width="220" height="60" rx="10" fill="#fff" stroke="#f59e0b" stroke-width="1.5" />
+          <text x="630" y="212" text-anchor="middle" font-weight="600">流程沉淀 / PMO 主导</text>
+          <text x="630" y="230" text-anchor="middle" fill="#71717a" font-size="10">→ 暂缓,需先补流程引擎</text>
+
+          <rect x="770" y="190" width="130" height="60" rx="10" fill="#fff" stroke="#ef4444" stroke-width="1.5" />
+          <text x="835" y="212" text-anchor="middle" font-weight="600">需评审/审批</text>
+          <text x="835" y="230" text-anchor="middle" fill="#71717a" font-size="10">→ 仍需依赖飞书</text>
+
+          <line x1="430" y1="150" x2="180" y2="190" stroke="#a1a1aa" marker-end="url(#dec)" />
+          <line x1="450" y1="150" x2="380" y2="190" stroke="#a1a1aa" marker-end="url(#dec)" />
+          <line x1="470" y1="150" x2="600" y2="190" stroke="#a1a1aa" marker-end="url(#dec)" />
+          <line x1="490" y1="150" x2="800" y2="190" stroke="#a1a1aa" marker-end="url(#dec)" />
+
+          <!-- Q2 -->
+          <rect x="320" y="290" width="280" height="50" rx="10" fill="#fff" stroke="#3b82f6" stroke-width="1.5" />
+          <text x="460" y="312" text-anchor="middle" font-weight="600">流程复杂度?</text>
+          <text x="460" y="328" text-anchor="middle" fill="#71717a" font-size="10">看 MeeGo 上有多少独立工作项类型 + 字段</text>
+
+          <line x1="460" y1="250" x2="460" y2="290" stroke="#a1a1aa" marker-end="url(#dec)" />
+
+          <rect x="60" y="370" width="240" height="60" rx="10" fill="#fff" stroke="#10b981" stroke-width="1.5" />
+          <text x="180" y="392" text-anchor="middle" font-weight="600">≤ 3 种 · 字段 ≤ 30</text>
+          <text x="180" y="410" text-anchor="middle" fill="#71717a" font-size="10">→ 可直接迁,用 metadata + label 兜住</text>
+
+          <rect x="340" y="370" width="240" height="60" rx="10" fill="#fff" stroke="#f59e0b" stroke-width="1.5" />
+          <text x="460" y="392" text-anchor="middle" font-weight="600">5-10 种 · 字段 30-100</text>
+          <text x="460" y="410" text-anchor="middle" fill="#71717a" font-size="10">→ 先开发字段引擎,再迁</text>
+
+          <rect x="620" y="370" width="240" height="60" rx="10" fill="#fff" stroke="#ef4444" stroke-width="1.5" />
+          <text x="740" y="392" text-anchor="middle" font-weight="600">&gt; 10 种 · 字段 &gt; 100</text>
+          <text x="740" y="410" text-anchor="middle" fill="#71717a" font-size="10">→ 先做精简或保留 MeeGo</text>
+
+          <line x1="400" y1="340" x2="200" y2="370" stroke="#a1a1aa" marker-end="url(#dec)" />
+          <line x1="460" y1="340" x2="460" y2="370" stroke="#a1a1aa" marker-end="url(#dec)" />
+          <line x1="520" y1="340" x2="720" y2="370" stroke="#a1a1aa" marker-end="url(#dec)" />
+
+          <text x="460" y="465" text-anchor="middle" fill="#71717a" font-size="10">建议:用流程清单 + 字段清单做问卷,IT/PMO/研发负责人一起评分</text>
+        </svg>
+        <figcaption>图 2 · 决策树:先看诉求方向,再看流程复杂度</figcaption>
+      </figure>
+    </section>
+
+    <!-- ============ PHASES ============ -->
+    <section id="phases">
+      <h2>五阶段迁移路线图</h2>
+      <p>不要一步到位 —— 用<strong>双轨期</strong>过渡,中途随时能回退到 MeeGo。每个阶段都有清晰的退出准则与阻塞点。</p>
+
+      <div class="phase">
+        <div class="phase-head">
+          <div class="phase-num">1</div>
+          <div class="phase-title">现状盘点 + 立项决策</div>
+          <div class="phase-meta">退出准则:产出迁移 RFC + 高管签字</div>
+        </div>
+        <ul>
+          <li>导出 MeeGo 全部空间清单、每个空间的工作项类型 / 字段 / 流程节点 / 角色</li>
+          <li>统计:活跃用户数、月新增 issue 数、附件总量、是否依赖飞书审批</li>
+          <li>用<a href="#decision">决策树</a>给每个空间打"现在/暂缓/不迁"分级</li>
+          <li>组建迁移小组:1 名 PM + 1 名 PMO + 2-3 名研发(熟 Go/TS)</li>
+          <li>产出:<em>迁移可行性 RFC</em>(含本调研引用)、<em>三个月预算</em>、<em>风险登记册</em></li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <div class="phase-head">
+          <div class="phase-num">2</div>
+          <div class="phase-title">Multica 能力补齐(P0 必做)</div>
+          <div class="phase-meta">退出准则:补齐项通过 staging 验收</div>
+        </div>
+        <ul>
+          <li><strong>自定义字段(Custom Field)系统</strong>:新建 <code>field_definition</code> + <code>field_value</code> 表,支持 single/multi-select/user/date/text/url/number/relation 8 种基础类型,UI 渲染用 schema-driven form</li>
+          <li><strong>简化版流程引擎</strong>:在 issue 上加 <code>workflow_id</code>,新建 <code>workflow_definition(stages, transitions)</code>,UI 上让管理员配置阶段。
+          <em>不要</em>追平 MeeGo 的全部能力 —— 只做"线性流 + 串行节点 + 必填字段"够覆盖 70% 场景</li>
+          <li><strong>飞书 Bridge 服务</strong>(独立小服务):
+            <ul>
+              <li>飞书 SSO(OAuth2 + 用户映射)</li>
+              <li>事件 → 飞书 IM 卡片(订阅 multica WS,转发到飞书 webhook)</li>
+              <li>(可选)飞书审批 webhook 接收 + 状态回写到 multica issue</li>
+            </ul>
+          </li>
+          <li><strong>关联类型扩展</strong>:补齐 <code>blocks / blocked_by / duplicates / relates_to / split_to</code></li>
+          <li><strong>批量导入 API</strong>:<code>POST /api/workspaces/:id/issues/bulk-import</code>,带幂等键,允许 dry-run</li>
+          <li><strong>报表面板补齐</strong>:燃尽图 / 累计流图 / 阶段时长(基于已有 events 表派生)</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <div class="phase-head">
+          <div class="phase-num">3</div>
+          <div class="phase-title">小范围试点(1-2 个空间)</div>
+          <div class="phase-meta">退出准则:试点团队 NPS &gt; 0 + 关键流程跑通</div>
+        </div>
+        <ul>
+          <li>挑选研发流程相对标准化、对评审审批依赖弱的小团队(8-15 人)</li>
+          <li>跑数据迁移 dry-run(见<a href="#data-pipeline">下节</a>),让团队 review 字段映射</li>
+          <li>实际迁移 → 旧空间设为只读 → 新空间正式使用</li>
+          <li>双轨 2-4 周:出问题立刻退回 MeeGo</li>
+          <li>每周收集反馈,锁定 P1 改进列表(尤其是字段渲染、过滤、移动端体验)</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <div class="phase-head">
+          <div class="phase-num">4</div>
+          <div class="phase-title">分批扩展(按业务线滚动迁移)</div>
+          <div class="phase-meta">退出准则:80% 团队完成迁移 · 单团队迁移耗时 &lt; 3 天</div>
+        </div>
+        <ul>
+          <li>按风险/收益矩阵排序业务线:<em>研发类(高收益/低风险)→ 平台类 → 业务线 → 流程重的部门(最后)</em></li>
+          <li>每个团队的迁移 SOP:T-7 培训 / T-3 dry-run / T-0 正式迁 / T+1~14 双轨期 / T+15 关闭旧空间</li>
+          <li>同一时间段最多并行 2-3 个团队迁移,避免 IT 与培训资源被打满</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <div class="phase-head">
+          <div class="phase-num">5</div>
+          <div class="phase-title">收尾 & 长尾归档</div>
+          <div class="phase-meta">退出准则:MeeGo 帐号缩减到只读运维角色</div>
+        </div>
+        <ul>
+          <li>对"不能迁"的长尾流程做评估:重构进 Multica / 沉淀到飞书审批 / 接受废弃</li>
+          <li>历史数据归档:导出 MeeGo 完整数据到 S3 (JSON + 附件),保留 N 年(合规需要)</li>
+          <li>MeeGo 账号降级到运维角色(只用作历史查询)</li>
+          <li>沉淀 internal docs:Multica 操作手册、字段命名规范、Agent 使用指南</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ DATA PIPELINE ============ -->
+    <section id="data-pipeline">
+      <h2>数据迁移管道(技术细节)</h2>
+      <p>实际跑数据这一步,既要"全量历史"又要"增量同步",还要保证可重放、可回滚。下面是建议的管道架构:</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 920 380" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="11">
+          <defs>
+            <marker id="dp" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+            </marker>
+          </defs>
+
+          <!-- meego -->
+          <rect x="20" y="40" width="180" height="60" rx="10" fill="#00d6b9" />
+          <text x="110" y="65" fill="#fff" text-anchor="middle" font-weight="600">飞书 MeeGo</text>
+          <text x="110" y="82" fill="#fff" text-anchor="middle" font-size="10">OpenAPI · plugin_token</text>
+
+          <!-- extractor -->
+          <rect x="240" y="20" width="200" height="100" rx="10" fill="#fff" stroke="#3b82f6" stroke-width="1.5" />
+          <text x="340" y="42" text-anchor="middle" font-weight="600">extractor (Go)</text>
+          <text x="340" y="58" text-anchor="middle" fill="#71717a">分页拉取 work_items</text>
+          <text x="340" y="74" text-anchor="middle" fill="#71717a">+ field_definitions</text>
+          <text x="340" y="90" text-anchor="middle" fill="#71717a">+ comments + attachments</text>
+          <text x="340" y="106" text-anchor="middle" fill="#a1a1aa" font-size="10">checkpoint per page</text>
+
+          <line x1="200" y1="70" x2="240" y2="70" stroke="#a1a1aa" marker-end="url(#dp)" />
+
+          <!-- staging -->
+          <rect x="480" y="20" width="180" height="100" rx="10" fill="#fff" stroke="#3b82f6" stroke-width="1.5" />
+          <text x="570" y="42" text-anchor="middle" font-weight="600">staging.json</text>
+          <text x="570" y="58" text-anchor="middle" fill="#71717a">原始数据落盘</text>
+          <text x="570" y="74" text-anchor="middle" fill="#71717a">+ S3(附件二进制)</text>
+          <text x="570" y="90" text-anchor="middle" fill="#71717a">+ schema 快照</text>
+          <text x="570" y="106" text-anchor="middle" fill="#a1a1aa" font-size="10">可独立 review</text>
+
+          <line x1="440" y1="70" x2="480" y2="70" stroke="#a1a1aa" marker-end="url(#dp)" />
+
+          <!-- transformer -->
+          <rect x="240" y="160" width="200" height="100" rx="10" fill="#fff" stroke="#f59e0b" stroke-width="1.5" />
+          <text x="340" y="182" text-anchor="middle" font-weight="600">transformer</text>
+          <text x="340" y="198" text-anchor="middle" fill="#71717a">apply mapping.yaml</text>
+          <text x="340" y="214" text-anchor="middle" fill="#71717a">field → field / metadata</text>
+          <text x="340" y="230" text-anchor="middle" fill="#71717a">user → user_id (mapping)</text>
+          <text x="340" y="246" text-anchor="middle" fill="#a1a1aa" font-size="10">输出 multica 内部格式</text>
+
+          <line x1="570" y1="120" x2="340" y2="160" stroke="#a1a1aa" marker-end="url(#dp)" />
+
+          <!-- validator -->
+          <rect x="480" y="160" width="180" height="100" rx="10" fill="#fff" stroke="#f59e0b" stroke-width="1.5" />
+          <text x="570" y="182" text-anchor="middle" font-weight="600">validator</text>
+          <text x="570" y="198" text-anchor="middle" fill="#71717a">必填字段 / 引用完整性</text>
+          <text x="570" y="214" text-anchor="middle" fill="#71717a">枚举映射检查</text>
+          <text x="570" y="230" text-anchor="middle" fill="#71717a">导出 report.html</text>
+          <text x="570" y="246" text-anchor="middle" fill="#a1a1aa" font-size="10">人工 review checkpoint</text>
+
+          <line x1="440" y1="210" x2="480" y2="210" stroke="#a1a1aa" marker-end="url(#dp)" />
+
+          <!-- loader -->
+          <rect x="700" y="160" width="200" height="100" rx="10" fill="#fff" stroke="#10b981" stroke-width="1.5" />
+          <text x="800" y="182" text-anchor="middle" font-weight="600">loader</text>
+          <text x="800" y="198" text-anchor="middle" fill="#71717a">bulk-import API</text>
+          <text x="800" y="214" text-anchor="middle" fill="#71717a">幂等键 = meego_id</text>
+          <text x="800" y="230" text-anchor="middle" fill="#71717a">失败可重放</text>
+          <text x="800" y="246" text-anchor="middle" fill="#a1a1aa" font-size="10">附件并发上传 S3</text>
+
+          <line x1="660" y1="210" x2="700" y2="210" stroke="#10b981" marker-end="url(#dp)" />
+
+          <!-- multica -->
+          <rect x="700" y="40" width="200" height="60" rx="10" fill="#6366f1" />
+          <text x="800" y="65" fill="#fff" text-anchor="middle" font-weight="600">Multica</text>
+          <text x="800" y="82" fill="#fff" text-anchor="middle" font-size="10">workspace + issues</text>
+
+          <line x1="800" y1="160" x2="800" y2="100" stroke="#10b981" marker-end="url(#dp)" />
+
+          <!-- delta -->
+          <rect x="100" y="290" width="720" height="60" rx="10" fill="#fff" stroke="#a1a1aa" stroke-dasharray="4 4" />
+          <text x="460" y="313" text-anchor="middle" font-weight="600">增量同步:由 MeeGo 三方 webhook 触发器 + 1 分钟 cron 双保险</text>
+          <text x="460" y="332" text-anchor="middle" fill="#71717a" font-size="10">webhook 收到 work_item.updated → diff staging → 增量 transform/validate/load</text>
+        </svg>
+        <figcaption>图 3 · ETL + 增量同步;每一步都有"产物文件",可独立 review 与重放</figcaption>
+      </figure>
+
+      <h3>关键设计点</h3>
+      <ul>
+        <li><strong>幂等键</strong>:在 issue.metadata 上保留 <code>meego_id</code>,loader 用它做 upsert,允许重复跑。</li>
+        <li><strong>用户映射文件</strong>:<code>users.csv (meego_user_key, multica_user_id)</code>,人工 review 一次,后续自动用。</li>
+        <li><strong>字段映射 DSL</strong>:用 <code>mapping.yaml</code> 描述 field → 多种目标(field_value / metadata / label / project),支持公式与默认值。</li>
+        <li><strong>评论时间戳保留</strong>:用 <code>created_at_override</code> 字段,避免迁移后所有评论都变成"今天"。需要 multica handler 在迁移用户身份下允许覆盖时间戳。</li>
+        <li><strong>附件并发上传</strong>:大附件直传 S3 + 写入 attachments 表;小附件可以 inline。</li>
+        <li><strong>双轨期增量</strong>:迁移完成后保持 1-2 周增量同步,让用户在两边都能看到新数据,直到信心建立。</li>
+      </ul>
+    </section>
+
+    <!-- ============ DEV TASKS ============ -->
+    <section id="dev-tasks">
+      <h2>Multica 侧研发改造任务清单</h2>
+      <p>给研发团队的可拆分 backlog,每条都能独立 PR 上线:</p>
+
+      <table>
+        <thead>
+          <tr><th style="width: 40px">#</th><th>任务</th><th>层级</th><th>优先级</th><th>预估工作量</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>新建 <code>field_definition</code> + <code>field_value</code> 表 + sqlc 查询(packages/db)</td><td>backend</td><td>P0</td><td>3-5 人天</td></tr>
+          <tr><td>2</td><td>UI 字段渲染框架(packages/views/issue 内 schema-driven form)</td><td>frontend</td><td>P0</td><td>5-8 人天</td></tr>
+          <tr><td>3</td><td>字段类型 8 种基础实现(text/number/date/single/multi/user/url/relation)</td><td>full-stack</td><td>P0</td><td>各 1-2 人天</td></tr>
+          <tr><td>4</td><td>简化流程引擎:<code>workflow_definition</code> + <code>workflow_transition</code> 表 + 校验</td><td>backend</td><td>P0</td><td>5-7 人天</td></tr>
+          <tr><td>5</td><td>流程引擎 UI:阶段配置面板 + 流转面板</td><td>frontend</td><td>P0</td><td>5-7 人天</td></tr>
+          <tr><td>6</td><td>批量导入 API(<code>POST /workspaces/:id/issues/bulk-import</code>,带 dry-run + idempotency)</td><td>backend</td><td>P0</td><td>3 人天</td></tr>
+          <tr><td>7</td><td>评论时间戳 override(handler 加 admin/migrator scope)</td><td>backend</td><td>P0</td><td>1 人天</td></tr>
+          <tr><td>8</td><td>关联类型扩展(blocks / duplicates / split_to / relates_to)</td><td>backend</td><td>P1</td><td>2 人天</td></tr>
+          <tr><td>9</td><td>飞书 SSO(OAuth2 + 邮箱映射 + 用户自动 provisioning)</td><td>backend</td><td>P1</td><td>3 人天</td></tr>
+          <tr><td>10</td><td>飞书 Bridge 服务(独立小服务,订阅 WS,推飞书 IM 卡片)</td><td>新服务</td><td>P1</td><td>5-7 人天</td></tr>
+          <tr><td>11</td><td>Dashboard 补齐:燃尽图 / 累积流图 / 阶段时长</td><td>full-stack</td><td>P1</td><td>5-8 人天</td></tr>
+          <tr><td>12</td><td>WBS / 甘特视图(基于 projects 模块扩展)</td><td>frontend</td><td>P2</td><td>5-8 人天</td></tr>
+          <tr><td>13</td><td>迁移工具(ETL):extractor + transformer + validator + loader 四件套</td><td>独立 repo</td><td>P0</td><td>10-15 人天</td></tr>
+          <tr><td>14</td><td>用户映射 + 字段映射 DSL 与编辑器</td><td>独立 repo</td><td>P0</td><td>3-5 人天</td></tr>
+          <tr><td>15</td><td>(可选)字段级权限:在 field_definition 上加 read_role/write_role,handler 校验</td><td>backend</td><td>P2</td><td>3-5 人天</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <p class="callout-title">关于动 Multica 上游代码</p>
+        <p class="callout-body">
+          Multica 是开源项目,改动有两种策略:<br />
+          <strong>(A) Fork 维护私有分支</strong>:适合公司不打算贡献回上游、愿意自己维护;<br />
+          <strong>(B) 上游 PR + 自建插件层</strong>:把字段引擎、流程引擎做成可关闭的功能(feature flag),默认关闭对上游影响小,贡献回 main 后维护成本骤降。<br />
+          <em>建议优先尝试 (B)</em> —— Multica 当前 80+ 次迁移说明它愿意迭代结构,字段/流程系统有合理化空间。
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ RISKS ============ -->
+    <section id="risks">
+      <h2>风险与对策</h2>
+      <table>
+        <thead><tr><th style="width: 200px">风险</th><th>影响</th><th>对策</th></tr></thead>
+        <tbody>
+          <tr><td><strong>用户抗拒</strong>:习惯了 MeeGo 的人不愿换</td><td>高</td><td>分阶段、双轨期;请试点团队当布道者;Multica 实时性 + Agent 演示制造"新鲜感"</td></tr>
+          <tr><td><strong>流程能力差距</strong>:某流程在 Multica 上确实表达不出来</td><td>高</td><td>P2 阶段做"流程精简会",PMO 主持评估;不能精简的留在 MeeGo 或飞书审批</td></tr>
+          <tr><td><strong>飞书审批依赖</strong>:发布单/上线单走飞书审批</td><td>中</td><td>用 Multica issue + 飞书 Bridge 双向同步状态,而不是替换审批引擎</td></tr>
+          <tr><td><strong>历史数据保真度</strong>:迁移后字段/状态不一致</td><td>中</td><td>把 staging.json 长期保存;在 issue 里加"原 MeeGo 链接",争议时可回查</td></tr>
+          <tr><td><strong>评论时间戳与作者错乱</strong></td><td>中</td><td>handler 支持 override + 用户映射严格 review;迁移工具默认 dry-run</td></tr>
+          <tr><td><strong>OpenAPI 速率限制</strong></td><td>低-中</td><td>extractor 自带退避 + checkpoint;按空间分批拉取</td></tr>
+          <tr><td><strong>Multica 上游 breaking change</strong></td><td>中</td><td>锁定 release tag;改动尽量做成 feature flag;关注上游 release notes</td></tr>
+          <tr><td><strong>合规 / 数据出境</strong></td><td>视行业而定</td><td>self-host 内部部署;附件 S3 用国内云;审计日志保留 N 年</td></tr>
+          <tr><td><strong>权限模型缩水</strong>:从矩阵权限退回 RBAC 3 级</td><td>中-高</td><td>P2 决策:接受 / 自建字段权限;同时收紧"敏感字段是否进 Multica"的边界</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ OPEN QUESTIONS ============ -->
+    <section id="open-questions">
+      <h2>公司侧待确认问题(决策前必答)</h2>
+      <div class="callout warn">
+        <p class="callout-body">这些问题需要 IT/PMO/研发负责人在<strong>决策前</strong>给出答案,否则 RFC 写不下去。</p>
+      </div>
+      <ol>
+        <li>公司在 MeeGo 上有<strong>几个空间</strong>?每个空间有<strong>几种工作项类型</strong>?字段总数大致多少?</li>
+        <li>是否有强依赖<strong>飞书审批</strong>的发布/上线/合同流程?如果有,能否在 Multica 上只展示状态、不替换审批?</li>
+        <li>有没有<strong>必须保留的度量报表</strong>?清单是什么(燃尽图、阶段时长、缺陷收敛、其他)?</li>
+        <li><strong>用户身份源</strong>从哪里来?飞书企业身份?LDAP?自有 IdP?Multica 需要对接哪一个?</li>
+        <li>历史数据需要<strong>全量迁还是只迁近 N 个月</strong>?保留多久?是否需要做合规归档(等保/金融/医疗)?</li>
+        <li>谁是<strong>这次迁移的 owner</strong>(单点责任人)?是否有跨部门协调权?</li>
+        <li>预算与时间窗口:本次迁移想在<strong>多少周内</strong>完成?投入多少人?</li>
+        <li>是否考虑把<strong>改造贡献回 Multica 上游</strong>?(影响 fork 策略)</li>
+      </ol>
+    </section>
+
+    <!-- ============ REFERENCES ============ -->
+    <section id="references">
+      <h2>参考资料</h2>
+      <ul>
+        <li>飞书项目(Meegle / MeeGo)开发者文档:<a href="https://meego.feishu.cn/open/docs">https://meego.feishu.cn/open/docs</a> · 工作项 / 流程 / 字段 / 视图 / OpenAPI</li>
+        <li>Meegle 国际版文档:<a href="https://meegle.com">https://meegle.com</a> · 含产品介绍与 SDK</li>
+        <li>飞书开放平台 - SSO / IM 卡片 / 审批 webhook</li>
+        <li>Multica 项目速览:<a href="../overview.html">../overview.html</a></li>
+        <li>Multica 关键模块深度解析:<a href="../deep-dive/index.html">../deep-dive/index.html</a> — 改动前请先看 ApiClient / parseWithFallback / TaskService 三篇</li>
+        <li>Multica CLAUDE.md:<a href="../../CLAUDE.md">../../CLAUDE.md</a> — 架构铁律,补能力前必须遵守</li>
+      </ul>
+    </section>
+
+    <footer>
+      Multica · 飞书 MeeGo 迁移调研 · 文档 v0.1 · 本文档基于公开资料 + 当前 main 分支结构生成,
+      具体能力差距以 review 时实际测试为准。
+    </footer>
+  </main>
+</div>
+</body>
+</html>

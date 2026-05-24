@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multica · 目录结构与包用途</title>
+<link rel="stylesheet" href="../deep-dive/style.css" />
+<style>
+  .pkg-tree { font-family: var(--font-mono); font-size: 13px; line-height: 1.7; background: var(--surface); padding: 14px 18px; border: 1px solid var(--border); border-radius: var(--radius-md); white-space: pre; overflow-x: auto; }
+  .pkg-tree b { color: var(--brand); font-weight: 600; }
+  .pkg-tree i { color: var(--fg-subtle); font-style: normal; }
+  .role-table th { font-weight: 500; }
+  .role-table th.col-path { width: 240px; }
+  .role-table th.col-role { width: 90px; }
+  .role-table td.col-path { font-family: var(--font-mono); font-size: 12px; }
+  .role-tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--fg-muted); }
+  .role-tag.app { background: color-mix(in oklab, var(--brand) 14%, transparent); color: var(--brand); }
+  .role-tag.lib { background: color-mix(in oklab, var(--info) 14%, transparent); color: var(--info); }
+  .role-tag.svc { background: color-mix(in oklab, var(--success) 14%, transparent); color: var(--success); }
+  .role-tag.tool { background: color-mix(in oklab, var(--warning) 14%, transparent); color: var(--warning); }
+  .role-tag.cfg { background: color-mix(in oklab, var(--fg-subtle) 14%, transparent); color: var(--fg-subtle); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb"><a href="../overview.html">← 项目速览</a></div>
+  <div class="title-block">
+    <h1>目录结构与包用途</h1>
+    <p class="path">multica/ — pnpm workspaces + Turborepo + Go monorepo</p>
+    <p class="lede">
+      Multica 是 <strong>pnpm workspaces + Turborepo</strong> 管理的 monorepo,加上一个独立的 Go 后端目录树。
+      本文给出仓库根的全部一级目录、Go 后端的所有子包、前端 packages 与 apps 的子目录,逐项注明<strong>用途、依赖方向、可见性边界</strong>。
+    </p>
+  </div>
+
+  <!-- ========== 仓库根 ========== -->
+  <section>
+    <h2>① 仓库根目录</h2>
+    <div class="pkg-tree">multica/
+├── <b>apps/</b>          <i># 五个可独立部署的应用 (web / desktop / mobile / docs)</i>
+├── <b>packages/</b>      <i># 跨应用共享的前端代码 (core / ui / views / tsconfig / eslint-config)</i>
+├── <b>server/</b>        <i># Go 单体后端 (HTTP + WS + CLI + daemon 全在这里)</i>
+├── <b>docs/</b>          <i># 项目级文档(html + md),你正在看的就是它的子目录</i>
+├── <b>e2e/</b>           <i># Playwright 端到端测试,跨 web 与 server</i>
+├── <b>scripts/</b>       <i># 跨语言脚本(check.sh / dev.sh / install.{sh,ps1} 等)</i>
+├── <b>docker/</b>        <i># 容器入口脚本</i>
+├── <b>.github/</b>       <i># CI / Issue 模板 / Release 工作流</i>
+├── package.json          <i># root + pnpm catalog,所有版本号集中托管</i>
+├── pnpm-workspace.yaml   <i># 声明 workspace 成员 (apps/* + packages/*)</i>
+├── turbo.json            <i># Turborepo pipeline (build / typecheck / test / lint)</i>
+├── Makefile              <i># 跨语言编排:make dev / make check / make test</i>
+├── docker-compose.yml    <i># 本地一键起 PostgreSQL + Redis</i>
+├── .goreleaser.yml       <i># Go CLI 发布配置 (multica CLI)</i>
+└── ...</div>
+
+    <table class="role-table">
+      <thead><tr><th class="col-path">目录</th><th class="col-role">类型</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td class="col-path">apps/</td><td><span class="role-tag app">应用</span></td><td>面向最终用户的可部署单元(各自有独立 package.json + 构建产物)。</td></tr>
+        <tr><td class="col-path">packages/</td><td><span class="role-tag lib">共享库</span></td><td>跨 apps 复用的前端代码。<strong>不可独立部署</strong>,只通过 workspace 协议被 apps 引用。</td></tr>
+        <tr><td class="col-path">server/</td><td><span class="role-tag svc">服务</span></td><td>Go monorepo 内"子 mod":单一 <code>go.mod</code> 同时提供 HTTP API、WebSocket、CLI、本地 daemon。</td></tr>
+        <tr><td class="col-path">docs/</td><td><span class="role-tag cfg">文档</span></td><td>项目级 HTML / Markdown 文档,与 <code>apps/docs/</code>(对外文档站)区分:这里是"项目内文档"。</td></tr>
+        <tr><td class="col-path">e2e/</td><td><span class="role-tag tool">测试</span></td><td>Playwright 用例,需要同时启动 web + server,放在仓库根而非 apps/web 内。</td></tr>
+        <tr><td class="col-path">scripts/</td><td><span class="role-tag tool">工具</span></td><td>shell + ps + mjs 混合脚本,提供启动 / 检查 / 安装能力,是 Makefile 的具体实现。</td></tr>
+        <tr><td class="col-path">docker/</td><td><span class="role-tag tool">部署</span></td><td>Docker 镜像入口脚本(实际镜像构建在根目录的 <code>Dockerfile{,.web}</code>)。</td></tr>
+        <tr><td class="col-path">.github/</td><td><span class="role-tag cfg">CI</span></td><td>GitHub Actions:<code>ci.yml</code>(typecheck/test) · <code>desktop-smoke.yml</code> · <code>release.yml</code>。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== apps ========== -->
+  <section>
+    <h2>② apps/* — 五个应用</h2>
+    <p style="color: var(--fg-muted);">每个 app 都是独立的可构建单元。它们都依赖 <code>@multica/core</code> + <code>@multica/ui</code> + <code>@multica/views</code>(mobile 例外)。</p>
+
+    <table class="role-table">
+      <thead><tr><th class="col-path">目录</th><th class="col-role">技术栈</th><th>用途与边界</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="col-path">apps/web</td>
+          <td><span class="role-tag app">Next.js</span></td>
+          <td>面向终端用户的<strong>主 Web 应用</strong>。Next 16 App Router。<code>features/</code> 放 Web 独有逻辑(如 <code>auth-cookie</code>);<code>platform/</code> 是<strong>唯一允许引用 next/* 的地方</strong>。所有页面壳子从 <code>@multica/views</code> 装载。</td>
+        </tr>
+        <tr>
+          <td class="col-path">apps/desktop</td>
+          <td><span class="role-tag app">Electron</span></td>
+          <td>桌面端,electron-vite 构建。<code>src/main/</code>(主进程,自动更新等)<code>src/preload/</code>(隔离桥)<code>src/renderer/</code>(走 react-router-dom 而非 next)。共享 packages/* 以保持业务一致。</td>
+        </tr>
+        <tr>
+          <td class="col-path">apps/mobile</td>
+          <td><span class="role-tag app">Expo / RN</span></td>
+          <td>iOS 移动端。<strong>独立技术栈</strong>:Expo SDK 55 + RN 0.83 + NativeWind。只与后端共享 API,与 packages/* <strong>仅共享类型</strong>(避免 RN 不支持的 DOM 依赖)。</td>
+        </tr>
+        <tr>
+          <td class="col-path">apps/docs</td>
+          <td><span class="role-tag app">Fumadocs</span></td>
+          <td>对外<strong>产品文档站</strong>(MDX)。<code>content/docs/</code> 双语 mdx;<code>middleware.ts</code> 处理 i18n。与项目内 <code>docs/</code> 不同源。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== packages ========== -->
+  <section>
+    <h2>③ packages/* — 共享库与边界铁律</h2>
+    <p>四个共享包按"<strong>headless → 视觉 → 业务 → 配置</strong>"分层。包之间的依赖方向是单向的,违反即是 PR 拒绝项。</p>
+
+    <div class="figure">
+      <svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L10 5 L0 10 z" fill="#888" />
+          </marker>
+        </defs>
+        <rect x="20" y="100" width="170" height="60" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5" />
+        <text x="105" y="125" text-anchor="middle" font-size="14" font-weight="600">@multica/core</text>
+        <text x="105" y="143" text-anchor="middle" font-size="11" fill="#666">headless 业务逻辑</text>
+
+        <rect x="220" y="40" width="170" height="60" rx="8" fill="#fff" stroke="#22c55e" stroke-width="1.5" />
+        <text x="305" y="65" text-anchor="middle" font-size="14" font-weight="600">@multica/ui</text>
+        <text x="305" y="83" text-anchor="middle" font-size="11" fill="#666">原子视觉组件 (零业务)</text>
+
+        <rect x="220" y="160" width="170" height="60" rx="8" fill="#fff" stroke="#f59e0b" stroke-width="1.5" />
+        <text x="305" y="185" text-anchor="middle" font-size="14" font-weight="600">@multica/views</text>
+        <text x="305" y="203" text-anchor="middle" font-size="11" fill="#666">业务页面组件</text>
+
+        <rect x="430" y="100" width="170" height="60" rx="8" fill="#fff" stroke="#a855f7" stroke-width="1.5" />
+        <text x="515" y="125" text-anchor="middle" font-size="14" font-weight="600">apps/{web,desktop}</text>
+        <text x="515" y="143" text-anchor="middle" font-size="11" fill="#666">最终装配</text>
+
+        <line x1="190" y1="120" x2="220" y2="80" stroke="#888" stroke-width="1.5" marker-end="url(#arr)" />
+        <line x1="190" y1="140" x2="220" y2="180" stroke="#888" stroke-width="1.5" marker-end="url(#arr)" />
+        <line x1="390" y1="80" x2="430" y2="120" stroke="#888" stroke-width="1.5" marker-end="url(#arr)" />
+        <line x1="390" y1="180" x2="430" y2="140" stroke="#888" stroke-width="1.5" marker-end="url(#arr)" />
+
+        <text x="380" y="20" text-anchor="middle" font-size="11" fill="#888">单向依赖:箭头方向 = "可以 import"</text>
+      </svg>
+    </div>
+
+    <table class="role-table">
+      <thead><tr><th class="col-path">包</th><th class="col-role">类型</th><th>用途与边界</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="col-path">packages/core</td>
+          <td><span class="role-tag lib">headless</span></td>
+          <td><strong>所有业务状态与服务端通信</strong>。Zustand stores · React Query queries/mutations · API client · WS client · 权限规则 · i18n。<br /><strong>禁止</strong>: <code>react-dom</code> · <code>localStorage</code> 直接调用 · <code>process.env</code> · <code>next/*</code>。所有平台依赖经 <code>platform/</code> 注入。</td>
+        </tr>
+        <tr>
+          <td class="col-path">packages/ui</td>
+          <td><span class="role-tag lib">visual</span></td>
+          <td><strong>原子视觉组件 (shadcn over Base UI)</strong> + Markdown 渲染 + tokens.css。<br /><strong>禁止</strong>:<code>@multica/core</code>(零业务,不知道 issue 长啥样)。</td>
+        </tr>
+        <tr>
+          <td class="col-path">packages/views</td>
+          <td><span class="role-tag lib">business</span></td>
+          <td>跨平台<strong>业务页面/区块组件</strong>:issues 看板、agent 列表、settings 面板等。<br /><strong>禁止</strong>:<code>next/*</code> · <code>react-router-dom</code>(路由通过 <code>NavigationAdapter</code> 注入)。<br />已国际化:<code>locales/{en,zh-Hans}/*.json</code> 25 个 namespace。</td>
+        </tr>
+        <tr>
+          <td class="col-path">packages/tsconfig</td>
+          <td><span class="role-tag cfg">config</span></td>
+          <td>共享 <code>tsconfig</code>:<code>base.json</code>(strict 严格模式) + <code>react-library.json</code>(jsx + dom)。所有 packages 都 extends 它。</td>
+        </tr>
+        <tr>
+          <td class="col-path">packages/eslint-config</td>
+          <td><span class="role-tag cfg">config</span></td>
+          <td>共享 ESLint flat config:<code>base.js</code>(通用) · <code>next.js</code> · <code>react.js</code>。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>核心包 packages/core 的子目录(business 域 × 横切能力)</h3>
+    <div class="pkg-tree">packages/core/
+├── <b>api/</b>                 <i># HTTP + WS 客户端 + zod 防御 (ApiClient · WSClient · parseWithFallback)</i>
+├── <b>auth/</b>                <i># AuthStore + utils (cookie / token 双模式)</i>
+├── <b>platform/</b>            <i># 平台桥:storage / keyboard / core-provider (Web vs Desktop 注入点)</i>
+├── <b>realtime/</b>            <i># WS provider + use-realtime-sync (事件 → React Query invalidation)</i>
+├── <b>i18n/</b>                <i># i18next 装配 + locale picker</i>
+├── <b>navigation/</b>          <i># NavigationAdapter (抽象 next/router vs react-router)</i>
+├── <b>permissions/</b>         <i># 前端规则引擎 (rules.ts)</i>
+├── <b>modals/</b>              <i># 全局模态注册栈</i>
+├── <b>paths/</b>               <i># URL 生成与 reserved slug</i>
+├── <b>analytics/</b>           <i># PostHog 埋点</i>
+├── <b>config/</b> · <b>logger.ts</b>     <i># 全局配置与日志</i>
+├── <b>query-client.ts</b>      <i># TanStack Query 全局实例</i>
+│
+│   <i># --- 业务域 (每域包含 queries/mutations/store/types) ---</i>
+├── <b>issues/</b>      <b>agents/</b>    <b>autopilots/</b>  <b>chat/</b>    <b>squads/</b>
+├── <b>workspace/</b>   <b>projects/</b>  <b>runtimes/</b>    <b>skills/</b>(在 runtimes 中) <b>labels/</b>
+├── <b>inbox/</b>       <b>pins/</b>      <b>dashboard/</b>    <b>github/</b>   <b>onboarding/</b>
+├── <b>feedback/</b>
+└── <b>types/</b>               <i># 跨域共享类型 (api · events · activity · attachment ...)</i></div>
+
+    <h3>视图包 packages/views 的子目录(每个对应一组页面)</h3>
+    <div class="pkg-tree">packages/views/
+├── auth/  invitations/  invite/  onboarding/  layout/   <i># 装配 / 准入</i>
+├── <b>issues/</b> <b>agents/</b> <b>autopilots/</b> <b>chat/</b> <b>squads/</b>     <i># 协作核心域</i>
+├── runtimes/ skills/ projects/ labels/ members/ search/ <i># 协作辅助域</i>
+├── inbox/ my-issues/ dashboard/ settings/ attachments/  <i># 用户旅程</i>
+├── editor/                                              <i># Tiptap 富文本(mention/code/math/mermaid)</i>
+├── modals/  navigation/  platform/  i18n/  common/      <i># 横切</i>
+└── <b>locales/</b>                                          <i># 25 个双语 JSON + glossary.md</i></div>
+  </section>
+
+  <!-- ========== server ========== -->
+  <section>
+    <h2>④ server/* — Go 后端</h2>
+    <p>
+      <strong>单一 Go module</strong>,但内部按"<code>cmd/</code> 启动入口 / <code>internal/</code> 私有实现 / <code>pkg/</code> 可复用包 / <code>migrations/</code> 数据库迁移 / <code>db/queries/</code> sqlc 输入"五段式组织。
+    </p>
+
+    <h3>cmd/* — 三个二进制入口</h3>
+    <table class="role-table">
+      <thead><tr><th class="col-path">目录</th><th class="col-role">产物</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td class="col-path">server/cmd/server</td><td><span class="role-tag svc">服务</span></td><td>主进程:HTTP + WebSocket。<code>router.go</code> 装配所有 handler;<code>listeners.go</code> 启动 Hub/Cron/Sweeper。</td></tr>
+        <tr><td class="col-path">server/cmd/migrate</td><td><span class="role-tag tool">CLI</span></td><td>数据库迁移工具(up / down / version),嵌入 <code>migrations/*.sql</code>。</td></tr>
+        <tr><td class="col-path">server/cmd/multica</td><td><span class="role-tag tool">CLI</span></td><td>分发给最终用户的 <strong>multica</strong> 命令行:login / daemon / issue / agent / repo / runtime / setup / update。Cobra + GoReleaser。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>internal/* — 不对外暴露的实现</h3>
+    <table class="role-table">
+      <thead><tr><th class="col-path">包</th><th class="col-role">职责</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td class="col-path">internal/handler</td><td><span class="role-tag svc">HTTP 层</span></td><td>所有 REST endpoint。一个文件 = 一个领域(<code>issue.go</code> / <code>agent.go</code> / <code>autopilot.go</code> ... 共 30+ 文件)。</td></tr>
+        <tr><td class="col-path">internal/service</td><td><span class="role-tag svc">业务层</span></td><td>跨多 handler 的业务逻辑:<code>task.go</code>(任务编排) · <code>autopilot.go</code> · <code>email.go</code> · <code>cron.go</code>。</td></tr>
+        <tr><td class="col-path">internal/realtime</td><td><span class="role-tag svc">WS</span></td><td>WebSocket Hub + Redis 多节点 relay(详见 <a href="../deep-dive/03-ws-client-and-hub.html">03-ws-client-and-hub</a>)。</td></tr>
+        <tr><td class="col-path">internal/daemonws</td><td><span class="role-tag svc">WS</span></td><td>面向 multica CLI / 本地 daemon 的<strong>私有</strong> WS 通道(任务下发 / 心跳)。</td></tr>
+        <tr><td class="col-path">internal/daemon</td><td><span class="role-tag tool">客户端</span></td><td>本地 agent 执行器(被 CLI 调用):config / wakeup / health / gc / 自动更新 / execenv 沙箱。</td></tr>
+        <tr><td class="col-path">internal/middleware</td><td><span class="role-tag svc">中间件</span></td><td>auth / workspace / ratelimit / csp / cloudfront / client / daemon_auth / request_logger。</td></tr>
+        <tr><td class="col-path">internal/auth</td><td><span class="role-tag svc">认证</span></td><td>cookie · jwt · cloudfront 签名 · PAT cache · membership cache · daemon_token cache。</td></tr>
+        <tr><td class="col-path">internal/events</td><td><span class="role-tag lib">事件总线</span></td><td>进程内 pub/sub:service publish,handler 与 hub subscribe。</td></tr>
+        <tr><td class="col-path">internal/metrics</td><td><span class="role-tag lib">监控</span></td><td>Prometheus registry + db / http / daemonws / realtime 五类指标。</td></tr>
+        <tr><td class="col-path">internal/storage</td><td><span class="role-tag lib">存储</span></td><td>对象存储抽象:<code>local.go</code> + <code>s3.go</code>。</td></tr>
+        <tr><td class="col-path">internal/agenttmpl</td><td><span class="role-tag lib">模板</span></td><td>24 个内置 agent 模板 (bug-fixer / code-reviewer / prd-drafter / ...) JSON 加载。</td></tr>
+        <tr><td class="col-path">internal/analytics</td><td><span class="role-tag lib">埋点</span></td><td>PostHog 客户端 + events 定义。</td></tr>
+        <tr><td class="col-path">internal/cli</td><td><span class="role-tag tool">CLI 助手</span></td><td>multica CLI 内部:client / config / output / update。</td></tr>
+        <tr><td class="col-path">internal/mention</td><td><span class="role-tag lib">工具</span></td><td>提及短码扩展 (<code>@user</code> · <code>@agent</code>)。</td></tr>
+        <tr><td class="col-path">internal/util</td><td><span class="role-tag lib">工具</span></td><td>pgx 类型转换 · 文本工具 · 平台进程探测。</td></tr>
+        <tr><td class="col-path">internal/logger</td><td><span class="role-tag lib">日志</span></td><td>统一 zap 包装。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>pkg/* — 可复用包(对外可被其他二进制 import)</h3>
+    <table class="role-table">
+      <thead><tr><th class="col-path">包</th><th class="col-role">职责</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td class="col-path">server/pkg/agent</td><td><span class="role-tag lib">agent 适配</span></td><td>每个 CLI agent 一个文件:claude · codex · copilot · cursor · gemini · hermes · kimi · kiro · openclaw · opencode · pi。统一接口 + 思考流解析 + stderr tail + 版本探测。</td></tr>
+        <tr><td class="col-path">server/pkg/db</td><td><span class="role-tag lib">数据访问</span></td><td><code>queries/*.sql</code> 是 sqlc 输入;<code>generated/*.sql.go</code> 是输出。<strong>所有数据库访问必须经此</strong>。</td></tr>
+        <tr><td class="col-path">server/pkg/protocol</td><td><span class="role-tag lib">协议</span></td><td>WS 协议定义:<code>events.go</code>(领域事件)+ <code>messages.go</code>(传输信封)。前后端共享语义。</td></tr>
+        <tr><td class="col-path">server/pkg/redact</td><td><span class="role-tag lib">脱敏</span></td><td>敏感字段(token / email / IP)统一脱敏。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>migrations/ + sqlc.yaml</h3>
+    <ul>
+      <li><strong>server/migrations/</strong> — <code>NNN_xxx.up.sql</code> + <code>NNN_xxx.down.sql</code> 双向迁移,80+ 个文件,通过 <code>cmd/migrate</code> 与 <code>internal/migrations</code>(嵌入 fs)统一执行。</li>
+      <li><strong>server/sqlc.yaml</strong> — 配置 sqlc:输入 <code>pkg/db/queries/*.sql</code>,输出 <code>pkg/db/generated/</code>。</li>
+    </ul>
+  </section>
+
+  <!-- ========== docs / e2e / scripts ========== -->
+  <section>
+    <h2>⑤ 其它支撑目录</h2>
+    <table class="role-table">
+      <thead><tr><th class="col-path">目录</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td class="col-path">docs/</td><td>项目内部文档:<a href="../overview.html">overview.html</a>(总览) · <a href="../deep-dive/index.html">deep-dive/</a>(模块全景与深度解析) · <a href="../research/meego-vs-multica.html">research/</a>(调研) · <a href="./index.html">structure/</a>(本页) · <a href="../er/index.html">er/</a>(数据模型 ER 图) · 多份 *.md(plan / rfc / outline)。</td></tr>
+        <tr><td class="col-path">e2e/</td><td>Playwright 端到端用例:auth · issues · comments · settings · onboarding-v2 · navigation · chat-attachments。需要同时运行 web + server。</td></tr>
+        <tr><td class="col-path">scripts/</td><td><code>dev.sh</code>(自动起 docker + server + web) · <code>check.sh</code>(typecheck + test + lint 全套) · <code>install.{sh,ps1}</code>(分发用一行命令安装 multica CLI) · <code>generate-reserved-slugs.mjs</code>(从 web 路由生成保留字)。</td></tr>
+        <tr><td class="col-path">.github/workflows</td><td><code>ci.yml</code>(每次 PR) · <code>desktop-smoke.yml</code>(electron 烟测) · <code>release.yml</code>(GoReleaser + npm publish)。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ========== 包依赖速查表 ========== -->
+  <section>
+    <h2>⑥ 包依赖速查(谁能 import 谁)</h2>
+    <table class="role-table">
+      <thead><tr><th>From → To</th><th>允许?</th><th>原因 / 例外</th></tr></thead>
+      <tbody>
+        <tr><td>apps/web → packages/*</td><td>✅</td><td>Web 是装配端,可以引用所有 packages。</td></tr>
+        <tr><td>apps/desktop → packages/*</td><td>✅</td><td>同 web。注意 next/* API 不可用。</td></tr>
+        <tr><td>apps/mobile → packages/*</td><td>⚠ 仅类型</td><td>RN 缺 DOM 依赖,实际只 import <code>@multica/core/types/*</code>。</td></tr>
+        <tr><td>packages/views → packages/core / ui</td><td>✅</td><td>views 是业务装配层,需要业务态(core)+ 视觉(ui)。</td></tr>
+        <tr><td>packages/views → next/* · react-router-dom</td><td>❌</td><td>必须经 <code>NavigationAdapter</code> 注入。</td></tr>
+        <tr><td>packages/ui → packages/core</td><td>❌</td><td>ui 必须 headless,不知道业务。</td></tr>
+        <tr><td>packages/core → react-dom · localStorage · process.env · next/*</td><td>❌</td><td>core 是 headless,平台依赖只能从 platform/ 桥进来。</td></tr>
+        <tr><td>server/internal/* ↔ server/pkg/*</td><td>✅ 单向</td><td>internal 可以 import pkg;<strong>pkg 不能 import internal</strong>(否则被外部消费时会拉进私有代码)。</td></tr>
+        <tr><td>server/cmd/* → server/internal/* + server/pkg/*</td><td>✅</td><td>cmd 是装配层。</td></tr>
+        <tr><td>handler → service / db.Queries / hub</td><td>✅</td><td>handler 是 HTTP 适配,业务下沉到 service。</td></tr>
+        <tr><td>service / handler → db 直接 SQL</td><td>❌</td><td>必须经 sqlc 生成的 <code>db.Queries</code>。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    Multica · 目录结构与包用途 · 基于 main 分支真实目录树整理。新增模块/包时请同步更新本表与 deep-dive 模块全景。
+  </footer>
+</div>
+</body>
+</html>

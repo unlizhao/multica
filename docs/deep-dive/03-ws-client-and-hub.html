@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>03 · WSClient × realtime.Hub · Multica 深度解析</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb">
+    <a href="../overview.html">项目速览</a> <span>›</span>
+    <a href="index.html">关键模块深度解析</a> <span>›</span>
+    <span>03 · WSClient × realtime.Hub</span>
+  </div>
+
+  <div class="title-block">
+    <h1>WSClient × realtime.Hub · 实时事件双方</h1>
+    <div class="path">packages/core/api/ws-client.ts · server/internal/realtime/hub.go</div>
+    <p class="lede">
+      Multica 把"看板的实时性"做成原生体验:任何人在任何客户端的修改,毫秒级广播给所有订阅者。
+      前端 <strong>WSClient</strong> 负责 <em>连接 / 重连 / 订阅 / 派发</em>;后端 <strong>realtime.Hub</strong> 负责 <em>授权 / room / 多节点中继</em>。
+    </p>
+  </div>
+
+  <section>
+    <h2>整体拓扑</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="12">
+        <defs>
+          <marker id="ar3" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+          <marker id="ar3b" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#3b82f6" />
+          </marker>
+        </defs>
+
+        <!-- clients -->
+        <rect x="20" y="20" width="160" height="50" rx="8" class="svg-fill-surface" stroke-width="1" stroke="#a1a1aa" />
+        <text x="100" y="42" class="svg-text" text-anchor="middle">Browser tab A</text>
+        <text x="100" y="58" class="svg-text-muted" text-anchor="middle" font-size="10">WSClient + WSProvider</text>
+
+        <rect x="20" y="90" width="160" height="50" rx="8" class="svg-fill-surface" stroke-width="1" stroke="#a1a1aa" />
+        <text x="100" y="112" class="svg-text" text-anchor="middle">Electron tab B</text>
+        <text x="100" y="128" class="svg-text-muted" text-anchor="middle" font-size="10">WSClient (token)</text>
+
+        <rect x="20" y="160" width="160" height="50" rx="8" class="svg-fill-surface" stroke-width="1" stroke="#a1a1aa" />
+        <text x="100" y="182" class="svg-text" text-anchor="middle">Mobile (Expo)</text>
+        <text x="100" y="198" class="svg-text-muted" text-anchor="middle" font-size="10">独立 WS impl</text>
+
+        <!-- node A -->
+        <rect x="280" y="40" width="220" height="100" rx="12" class="svg-fill-surface" stroke-width="1.5" stroke="#6366f1" />
+        <text x="390" y="60" class="svg-text" text-anchor="middle" font-weight="600">realtime.Hub (node A)</text>
+        <text x="390" y="80" class="svg-text-muted" text-anchor="middle">rooms[wsId] = clients[]</text>
+        <text x="390" y="98" class="svg-text-muted" text-anchor="middle">scopeSubs[issue/agent/...]</text>
+        <text x="390" y="116" class="svg-text-muted" text-anchor="middle">read pump · write pump</text>
+        <text x="390" y="132" class="svg-text-muted" text-anchor="middle" font-size="11">+ ping/pong heartbeat</text>
+
+        <!-- node B -->
+        <rect x="280" y="180" width="220" height="80" rx="12" class="svg-fill-surface" stroke-width="1.5" stroke="#6366f1" />
+        <text x="390" y="200" class="svg-text" text-anchor="middle" font-weight="600">realtime.Hub (node B)</text>
+        <text x="390" y="218" class="svg-text-muted" text-anchor="middle">同结构,独立实例</text>
+        <text x="390" y="236" class="svg-text-muted" text-anchor="middle" font-size="11">水平扩展节点</text>
+
+        <!-- redis -->
+        <rect x="600" y="100" width="240" height="100" rx="12" fill="#dc2626" />
+        <text x="720" y="125" fill="#fff" text-anchor="middle" font-weight="600">Redis Streams</text>
+        <text x="720" y="145" fill="#fff" text-anchor="middle" font-size="11">multica:realtime:shard:{N}</text>
+        <text x="720" y="163" fill="#fff" text-anchor="middle" font-size="11">N = hash(wsId) % shards</text>
+        <text x="720" y="181" fill="#fff" text-anchor="middle" font-size="11">consumer group / 节点</text>
+
+        <!-- arrows -->
+        <line x1="180" y1="45" x2="280" y2="80" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#ar3b)" />
+        <text x="220" y="40" class="svg-text-muted" font-size="10">WSS</text>
+        <line x1="180" y1="115" x2="280" y2="100" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#ar3b)" />
+        <line x1="180" y1="185" x2="280" y2="200" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#ar3b)" />
+
+        <line x1="500" y1="90" x2="600" y2="130" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar3)" />
+        <text x="540" y="100" class="svg-text-muted" font-size="10">publish</text>
+        <line x1="600" y1="170" x2="500" y2="220" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar3)" />
+        <text x="540" y="210" class="svg-text-muted" font-size="10">consume</text>
+
+        <!-- bottom: events bus -->
+        <rect x="280" y="290" width="560" height="50" rx="10" class="svg-fill-surface-2" stroke-width="1" stroke="#a1a1aa" />
+        <text x="560" y="315" class="svg-text" text-anchor="middle" font-weight="600">events.Bus(进程内事件总线)</text>
+        <text x="560" y="332" class="svg-text-muted" text-anchor="middle" font-size="11">handler 写库后触发 → Hub 广播 + Redis 中继</text>
+
+        <line x1="390" y1="260" x2="390" y2="290" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar3)" />
+      </svg>
+      <figcaption>图 3.1 · 多节点部署下,事件经 Redis Streams 在节点间中继,客户端永远只连最近的节点</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>前端:WSClient</h2>
+    <h3>核心签名</h3>
+    <table>
+      <thead><tr><th>成员</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>connect()</code></td><td>建立 WebSocket。鉴权用 cookie 或 query token,带上 client identity(平台/版本/OS)</td></tr>
+        <tr><td><code>disconnect()</code></td><td>主动关闭,清空重连定时器与 handler 集合</td></tr>
+        <tr><td><code>on(event, handler) → unsubscribe</code></td><td>注册事件处理器,返回反向函数</td></tr>
+        <tr><td><code>onReconnect(cb) → unsubscribe</code></td><td>重连成功后触发(用来触发 React Query refetch)</td></tr>
+        <tr><td><code>send(msg)</code></td><td>发送主动订阅命令(<code>subscribe_scope</code> / <code>unsubscribe_scope</code>)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>重连状态机</h3>
+    <figure class="figure">
+      <svg viewBox="0 0 880 240" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="12">
+        <defs>
+          <marker id="ar4" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+        </defs>
+
+        <ellipse cx="100" cy="120" rx="70" ry="35" class="svg-fill-surface" stroke-width="1.5" stroke="#a1a1aa" />
+        <text x="100" y="118" class="svg-text" text-anchor="middle" font-weight="600">idle</text>
+        <text x="100" y="135" class="svg-text-muted" text-anchor="middle" font-size="10">未连接</text>
+
+        <ellipse cx="320" cy="120" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#3b82f6" />
+        <text x="320" y="118" class="svg-text" text-anchor="middle" font-weight="600">connecting</text>
+        <text x="320" y="135" class="svg-text-muted" text-anchor="middle" font-size="10">握手中</text>
+
+        <ellipse cx="560" cy="120" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#10b981" />
+        <text x="560" y="118" class="svg-text" text-anchor="middle" font-weight="600">open</text>
+        <text x="560" y="135" class="svg-text-muted" text-anchor="middle" font-size="10">心跳/派发事件</text>
+
+        <ellipse cx="780" cy="120" rx="80" ry="38" class="svg-fill-surface" stroke-width="1.5" stroke="#f59e0b" />
+        <text x="780" y="115" class="svg-text" text-anchor="middle" font-weight="600">backoff</text>
+        <text x="780" y="132" class="svg-text-muted" text-anchor="middle" font-size="10">指数退避 + jitter</text>
+
+        <line x1="170" y1="120" x2="240" y2="120" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#ar4)" />
+        <text x="205" y="110" class="svg-text-muted" text-anchor="middle" font-size="10">connect()</text>
+
+        <line x1="400" y1="120" x2="480" y2="120" stroke="#10b981" stroke-width="1.5" marker-end="url(#ar4)" />
+        <text x="440" y="110" class="svg-text-muted" text-anchor="middle" font-size="10">onopen</text>
+
+        <line x1="640" y1="120" x2="700" y2="120" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ar4)" />
+        <text x="670" y="110" class="svg-text-muted" text-anchor="middle" font-size="10">onclose</text>
+
+        <path d="M780 158 Q780 200 320 200 Q170 200 170 150" stroke="#a1a1aa" stroke-width="1" fill="none" marker-end="url(#ar4)" />
+        <text x="500" y="215" class="svg-text-muted" text-anchor="middle" font-size="10">setTimeout → connect() 重试,onReconnect 通知订阅者</text>
+
+        <line x1="320" y1="158" x2="170" y2="150" stroke="#ef4444" stroke-width="1" marker-end="url(#ar4)" />
+        <text x="240" y="180" class="svg-text-muted" text-anchor="middle" font-size="10">disconnect()</text>
+      </svg>
+      <figcaption>图 3.2 · WSClient 的 4 状态:断线进入 backoff,带 jitter 的指数退避防止节点重启时雪崩</figcaption>
+    </figure>
+    <p class="muted">关键:<strong>onReconnect 不携带数据</strong>。它只是一个信号,React Query 收到后调用 <code>queryClient.invalidateQueries()</code> 重新拉取关心的数据,确保"断线期间错过的事件"被一次性补齐。</p>
+  </section>
+
+  <section>
+    <h2>后端:realtime.Hub</h2>
+    <h3>关键结构</h3>
+    <pre><span class="k">type</span> Hub <span class="k">struct</span> {
+  rooms      <span class="k">map</span>[uuid.UUID]<span class="k">map</span>[*Client]<span class="k">struct</span>{}  <span class="c">// workspace → clients</span>
+  scopeSubs  <span class="k">map</span>[ScopeKey]<span class="k">map</span>[*Client]<span class="k">struct</span>{}  <span class="c">// (kind, id) 细粒度订阅</span>
+  register   <span class="k">chan</span> *Client
+  unregister <span class="k">chan</span> *Client
+  broadcast  <span class="k">chan</span> Envelope                       <span class="c">// 待广播事件</span>
+  relay      RelayBackend                          <span class="c">// nil / RedisShardedRelay</span>
+  metrics    *Metrics
+}</pre>
+    <h3>事件流</h3>
+    <ol>
+      <li>HTTP 升级到 WS,认证后构造 <code>*Client</code>(含 userID、wsScope、send chan)。</li>
+      <li>Client 写入 <code>register</code>,Hub 把它加入对应 room。</li>
+      <li>客户端发送 <code>subscribe_scope {kind: "issue", id: "..."}</code>,Hub 在 scopeSubs 注册。</li>
+      <li>handler 写库后调 <code>events.Bus.Emit(ev)</code> → Hub 把 ev 推到 broadcast 通道。</li>
+      <li>Hub 的中央 goroutine 决定接收者:同 ws 的 room + scope 订阅者并集去重。</li>
+      <li>多节点部署下,relay 同时把 ev 写到 Redis Streams 的 shard,使其它节点 consume 后回放(每个节点对自己的 client 投递,Redis 起到节点间总线的作用)。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>水平扩展:三种模式</h2>
+    <table>
+      <thead><tr><th>REALTIME_RELAY_MODE</th><th>行为</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>legacy</code></td><td>不中继,本节点广播本节点 client</td><td>单节点 / dev</td></tr>
+        <tr><td><code>sharded</code></td><td>仅经 Redis Streams 中继。所有节点都从 stream 消费,自己节点产生的 ev 也通过 stream 派发</td><td>生产多节点</td></tr>
+        <tr><td><code>dual</code></td><td>本节点直接广播 + Redis 中继(双发,客户端去重)</td><td>从 legacy 切到 sharded 的过渡期</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <p class="callout-title">为什么用 Streams 而不是 Pub/Sub</p>
+      <p class="callout-body">Redis Pub/Sub 没有消费组与持久化。Streams 用 consumer group 让每个节点独立消费、断线时不丢消息,代价是要做 ACK + trim;Multica 用按 wsId 哈希分片(shard count 可配),保证同工作区的事件顺序在单个 shard 内有序。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>事件 → Query 失效的契约</h2>
+    <p>这一段是<strong>整个前端架构的关键</strong>:WS 永不直接写 Zustand。流程是:</p>
+    <pre>WS 事件
+  → realtime/provider.tsx 的 useRealtimeSync
+  → 每个领域的 ws-updaters.ts(issues/ws-updaters.ts ...)
+  → queryClient.invalidateQueries(...)
+  → React Query 自动 refetch
+  → 组件重新渲染</pre>
+    <p class="muted">这避免了"WS 给的字段集 ≠ HTTP 给的字段集"导致的视觉错位。所有数据真源永远来自 HTTP 拉取,WS 只是失效信号。</p>
+  </section>
+
+  <div class="nav-prev-next">
+    <a href="02-parse-with-fallback.html">
+      <span class="label">‹ 上一个</span>
+      02 · parseWithFallback
+    </a>
+    <a href="04-core-provider.html">
+      <span class="label">下一个 ›</span>
+      04 · CoreProvider
+    </a>
+  </div>
+
+  <footer>Multica · 关键模块深度解析 · 03</footer>
+</div>
+</body>
+</html>

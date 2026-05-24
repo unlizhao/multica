@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>02 · parseWithFallback · Multica 深度解析</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="container">
+  <div class="breadcrumb">
+    <a href="../overview.html">项目速览</a> <span>›</span>
+    <a href="index.html">关键模块深度解析</a> <span>›</span>
+    <span>02 · parseWithFallback</span>
+  </div>
+
+  <div class="title-block">
+    <h1>parseWithFallback · API 响应契约的最后防线</h1>
+    <div class="path">packages/core/api/schema.ts</div>
+    <p class="lede">
+      装机版 Electron 客户端可能比服务器旧 6-12 个月。<strong>每个响应字段都是会漂移的合同。</strong>
+      parseWithFallback 把"信任服务器"变成"在客户端再校一遍",失败时降级,而不是把异常捅穿进 React 渲染。
+    </p>
+  </div>
+
+  <section>
+    <h2>核心签名</h2>
+    <pre>function parseWithFallback&lt;T&gt;(
+  schema: ZodSchema&lt;T&gt;,
+  raw: unknown,
+  fallback: T,
+  context?: string,
+): T</pre>
+    <table>
+      <thead><tr><th>参数</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><code>schema</code></td><td>由 zod 描述的期望结构(<code>api/schemas.ts</code> 中按领域定义)</td></tr>
+        <tr><td><code>raw</code></td><td>fetch 解析出来的原始 JSON,类型为 <code>unknown</code></td></tr>
+        <tr><td><code>fallback</code></td><td>校验失败时返回的安全值(空数组、空对象、合理默认)</td></tr>
+        <tr><td><code>context</code></td><td>用于错误上报的端点标签,例如 <code>"listIssues"</code></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>决策路径</h2>
+    <figure class="figure">
+      <svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace,monospace" font-size="12">
+        <defs>
+          <marker id="ar" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="#a1a1aa" />
+          </marker>
+        </defs>
+
+        <rect x="20" y="20" width="180" height="50" rx="8" fill="#6366f1" />
+        <text x="110" y="50" fill="#fff" text-anchor="middle" font-weight="600">unknown raw JSON</text>
+
+        <rect x="320" y="15" width="200" height="60" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#3b82f6" />
+        <text x="420" y="40" class="svg-text" text-anchor="middle" font-weight="600">schema.safeParse(raw)</text>
+        <text x="420" y="58" class="svg-text-muted" text-anchor="middle">runtime check</text>
+
+        <line x1="200" y1="45" x2="320" y2="45" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar)" />
+
+        <!-- success -->
+        <rect x="640" y="15" width="200" height="60" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#10b981" />
+        <text x="740" y="40" class="svg-text" text-anchor="middle" font-weight="600">return parsed</text>
+        <text x="740" y="58" class="svg-text-muted" text-anchor="middle">type-narrowed T</text>
+        <line x1="520" y1="45" x2="640" y2="45" stroke="#10b981" stroke-width="1" marker-end="url(#ar)" />
+        <text x="580" y="36" class="svg-text-muted" text-anchor="middle" font-size="11">success</text>
+
+        <!-- failure -->
+        <line x1="420" y1="75" x2="420" y2="120" stroke="#ef4444" stroke-width="1" marker-end="url(#ar)" />
+        <text x="436" y="105" class="svg-text-muted" text-anchor="start" font-size="11">failure</text>
+
+        <rect x="320" y="125" width="200" height="60" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#f59e0b" />
+        <text x="420" y="150" class="svg-text" text-anchor="middle" font-weight="600">console.warn</text>
+        <text x="420" y="168" class="svg-text-muted" text-anchor="middle">+ analytics breadcrumb</text>
+
+        <line x1="420" y1="185" x2="420" y2="215" stroke="#a1a1aa" stroke-width="1" marker-end="url(#ar)" />
+
+        <rect x="320" y="220" width="200" height="60" rx="10" class="svg-fill-surface" stroke-width="1.5" stroke="#a1a1aa" />
+        <text x="420" y="245" class="svg-text" text-anchor="middle" font-weight="600">return fallback</text>
+        <text x="420" y="263" class="svg-text-muted" text-anchor="middle">UI keeps working</text>
+
+        <!-- side notes -->
+        <rect x="640" y="125" width="220" height="160" rx="10" class="svg-fill-surface-2" stroke-width="1" stroke="#e4e4e7" />
+        <text x="660" y="148" class="svg-text" font-weight="600">永不 throw 进 UI</text>
+        <text x="660" y="170" class="svg-text-muted">• React 不会卸载子树</text>
+        <text x="660" y="188" class="svg-text-muted">• 列表降级为空 / 空对象</text>
+        <text x="660" y="206" class="svg-text-muted">• 单条记录降级为占位</text>
+        <text x="660" y="224" class="svg-text-muted">• warn 触发 sentry breadcrumb</text>
+        <text x="660" y="248" class="svg-text-muted">• 后端可灰度发布字段</text>
+        <text x="660" y="266" class="svg-text-muted">• 客户端可滞后升级</text>
+      </svg>
+      <figcaption>图 2.1 · parseWithFallback 的"成功 → return / 失败 → warn + fallback"两路决策</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>为什么不直接 <code>schema.parse(raw)</code>?</h2>
+    <p>zod 的 <code>parse</code> 在失败时 throw。在 React 19 的并发渲染下,如果它出现在 query function 里,React Query 会把这个错误传到 useQuery 的 <code>error</code>;
+    用户看到的就是带 <em>ErrorBoundary</em> 兜底的"出错了"页面。但事实上后端只是<strong>漏了一个新字段</strong>而已,UI 应该照常渲染。</p>
+    <p>parseWithFallback 用 <code>safeParse</code> 把这条路径改成:</p>
+    <ul>
+      <li>schema 与 raw 完全匹配 → 返回类型化的 T</li>
+      <li>不匹配 → console.warn + analytics 上报 + 返回 fallback,UI 继续渲染</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>典型用法</h2>
+    <pre><span class="c">// schemas.ts</span>
+export const IssueSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.enum([<span class="s">"backlog"</span>, <span class="s">"in_progress"</span>, <span class="s">"done"</span>])
+    .or(z.string()),  <span class="c">// 允许新枚举值降级为 string</span>
+  ...
+});
+
+<span class="c">// client.ts</span>
+async listIssues(wsId: string) {
+  const raw = await this.request(<span class="s">"GET"</span>, <span class="s">`/api/workspaces/${wsId}/issues`</span>);
+  <span class="k">return</span> parseWithFallback(IssuesArraySchema, raw, [], <span class="s">"listIssues"</span>);
+}</pre>
+    <p class="muted">注意 enum 用 <code>.or(z.string())</code>:服务器后续新增了 <code>"cancelled"</code> 状态,旧客户端会降级为 string,switch 走 default 分支(灰色徽章),而不是崩溃。</p>
+  </section>
+
+  <section>
+    <h2>三条金科玉律(写代码时记住)</h2>
+    <ol>
+      <li><strong>parse, don't cast</strong>:任何 <code>as Issue</code> / <code>as IssueResponse</code> 都是潜在 bug。</li>
+      <li><strong>fallback 必须能渲染</strong>:列表用 <code>[]</code>,对象用合理默认,布尔用 <code>false</code>。空字符串 <code>""</code> 比 undefined 更安全。</li>
+      <li><strong>switch 必须 default</strong>:任何 server-driven 的判断要假设会出现未知 case,UI 应降级为通用样式而不是空白。</li>
+    </ol>
+  </section>
+
+  <div class="callout danger">
+    <p class="callout-title">真实事故复盘</p>
+    <p class="callout-body">
+      #2143 — agent.kind 增加了 <code>"copilot_cli"</code>,旧 desktop 客户端不在 enum 中,渲染崩。<br />
+      #2147 — issue.status 从字符串改为对象 <code>{ key, label }</code>,旧客户端 <code>status.toUpperCase()</code> 抛 TypeError。<br />
+      #2192 — autopilot.deliveries 字段在某条件下返回 null 而非 [],<code>list.map</code> 直接 throw。<br />
+      三起事故的共同点:都跳过了 parseWithFallback。
+    </p>
+  </div>
+
+  <div class="nav-prev-next">
+    <a href="01-api-client.html">
+      <span class="label">‹ 上一个</span>
+      01 · ApiClient
+    </a>
+    <a href="03-ws-client-and-hub.html">
+      <span class="label">下一个 ›</span>
+      03 · WSClient × realtime.Hub
+    </a>
+  </div>
+
+  <footer>Multica · 关键模块深度解析 · 02</footer>
+</div>
+</body>
+</html>
