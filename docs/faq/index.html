@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multica · 常见问题 (FAQ)</title>
+<link rel="stylesheet" href="../deep-dive/style.css" />
+<style>
+  /* FAQ 折叠卡片 */
+  .faq-list { display: flex; flex-direction: column; gap: 8px; }
+  .faq-item {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 0;
+    overflow: hidden;
+  }
+  .faq-item summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 12px 16px;
+    font-weight: 500;
+    font-size: 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    user-select: none;
+    color: var(--fg);
+  }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::before {
+    content: "▸";
+    color: var(--fg-subtle);
+    font-size: 11px;
+    margin-top: 4px;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+  .faq-item[open] > summary::before { transform: rotate(90deg); }
+  .faq-item summary:hover { background: var(--surface-2); }
+  .faq-item[open] > summary { border-bottom: 1px solid var(--border); }
+  .faq-item .faq-body { padding: 14px 16px 18px 32px; color: var(--fg); }
+  .faq-item .faq-body p:last-child { margin-bottom: 0; }
+  .faq-item .faq-body table { margin: 8px 0 12px; font-size: 13px; }
+
+  /* 章节锚点 */
+  .toc-anchor { color: var(--fg-muted); margin-left: 6px; opacity: 0; transition: opacity 0.1s; font-weight: normal; font-size: 12px; }
+  section > h2:hover .toc-anchor { opacity: 1; }
+
+  /* 三轨对比表的"轨道"色块 */
+  .track-tag { display: inline-block; padding: 1px 6px; border-radius: var(--radius-sm); font-size: 11px; margin-right: 4px; font-weight: 500; }
+  .track-1 { background: rgba(59, 130, 246, 0.12); color: var(--info); }
+  .track-2 { background: rgba(16, 185, 129, 0.14); color: var(--success); }
+  .track-3 { background: rgba(236, 72, 153, 0.14); color: #db2777; }
+  @media (prefers-color-scheme: dark) {
+    .track-3 { color: #f472b6; }
+  }
+
+  /* ASCII 流程图 */
+  .ascii { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; white-space: pre; }
+
+  .toc-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .toc-list a { color: var(--fg); }
+  .toc-list a::before { content: "›  "; color: var(--fg-subtle); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="breadcrumb">
+    <a href="../overview.html">Multica 文档</a> / <span>常见问题 (FAQ)</span>
+  </div>
+
+  <div class="title-block">
+    <h1>常见问题 · FAQ</h1>
+    <p class="path">docs/faq/index.html</p>
+    <p class="lede">收录在阅读 / 维护代码时容易踩到认知陷阱的问题。每条 FAQ 都给出"一句话答案 + 关键证据 + 易错点",
+      并附上对应代码文件的可跳转链接。</p>
+  </div>
+
+  <!-- ========== 目录 ========== -->
+  <section id="toc">
+    <h2>目录</h2>
+    <div class="toc-list">
+      <a href="#session">Session 管理 — 浏览器、CLI、Agent 对话三条独立轨道</a>
+    </div>
+    <p class="muted" style="margin-top: 8px; font-size: 12px;">
+      后续新增的 FAQ 章节请按 <code>id="topic-name"</code> 追加,并在此目录补一行链接。
+    </p>
+  </section>
+
+  <!-- ========== Session 管理 ========== -->
+  <section id="session">
+    <h2>Session 管理 <a href="#session" class="toc-anchor">#</a></h2>
+    <p>"session" 在 Multica 里承担<strong>三种完全不同的责任</strong>,刚好对应三种使用场景。
+      把它们混为一谈是最常见的认知陷阱。</p>
+
+    <table>
+      <thead>
+        <tr><th style="width: 30%;">轨道</th><th style="width: 25%;">谁在用</th><th style="width: 25%;">存在哪里</th><th>形态</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="track-tag track-1">①</span> 浏览器 session</td>
+          <td>Web 前端 / Desktop (Electron)</td>
+          <td>浏览器 Cookie / Electron localStorage</td>
+          <td>短/中期 JWT</td>
+        </tr>
+        <tr>
+          <td><span class="track-tag track-2">②</span> CLI / daemon 登录会话</td>
+          <td><code>multica</code> CLI、本地 daemon</td>
+          <td><code>~/.multica/config.json</code></td>
+          <td>长期 PAT (<code>mul_</code>) 或 daemon token (<code>mdt_</code>)</td>
+        </tr>
+        <tr>
+          <td><span class="track-tag track-3">③</span> Agent 对话会话 (chat_session)</td>
+          <td>任何客户端 → 后端 → daemon → Claude Code</td>
+          <td>Postgres <code>chat_session</code> 表</td>
+          <td>DB 行 + <code>session_id</code> 字符串作为 resume 指针</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>三轨之间的数据流</h3>
+    <pre class="ascii">浏览器 ──登录──▶ Login handler ──发 JWT──▶ multica_auth Cookie ──▶ /api/* (Auth middleware)
+                                                                       │
+                                                                       ├─ 调 /api/tokens 建 PAT
+                                                                       │           │
+                                                                       │           ▼
+                                                               ~/.multica/config.json
+                                                                       │
+                                 ┌─────────────────────────────────────┴───────────┐
+                                 ▼                                                 ▼
+                         multica CLI                                       multica daemon
+                         (mul_xxx)                                         (mul_xxx 或 mdt_xxx)
+                                 │                                                 │
+                                 └─────────── /api/* (Auth) ──────────┐            │
+                                                                      │            │
+                                                                      ▼            ▼
+                                                      /api/daemon/* (DaemonAuth + Redis cache)
+                                                                      │
+                                                                      ▼
+                                                           chat_session.session_id
+                                                           (Claude Code resume pointer)</pre>
+
+    <h3>常见问题</h3>
+    <div class="faq-list">
+
+      <details class="faq-item" id="q-frontend-cookie">
+        <summary>① 浏览器 session 是怎么管理的?Cookie 名、过期、续签都在哪?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> 登录成功后,服务端用 <code>auth.SetAuthCookies</code> 一次写两枚 Cookie,
+            HttpOnly 的 <code>multica_auth</code> 携带 JWT,可读的 <code>multica_csrf</code> 用作 CSRF 校验,
+            默认 30 天过期 (<code>AUTH_TOKEN_TTL</code> 可覆盖)。</p>
+
+          <p><strong>关键代码:</strong></p>
+          <ul>
+            <li>颁发: <a href="../../server/internal/handler/auth.go">handler/auth.go</a> 的 <code>Login</code> / Google Login → <code>issueJWT(user)</code></li>
+            <li>设置 cookie: <a href="../../server/internal/auth/cookie.go">auth/cookie.go</a> <code>SetAuthCookies</code></li>
+            <li>注销: <a href="../../server/internal/auth/cookie.go">auth.ClearAuthCookies</a> 把两枚 cookie 都设 <code>MaxAge=-1</code></li>
+          </ul>
+
+          <table>
+            <thead><tr><th>Cookie</th><th>用途</th><th>关键属性</th></tr></thead>
+            <tbody>
+              <tr><td><code>multica_auth</code></td><td>HttpOnly,装 JWT</td><td>HttpOnly + SameSite=Strict + Secure(仅 HTTPS)</td></tr>
+              <tr><td><code>multica_csrf</code></td><td>JWT 派生的 HMAC</td><td><strong>非</strong> HttpOnly,前端 JS 可读,需回传到 <code>X-CSRF-Token</code></td></tr>
+              <tr><td>CloudFront-* 三件套</td><td>CDN 私有资源访问</td><td>由 <a href="../../server/internal/auth/cloudfront.go">cloudfront.go</a> 同步签发</td></tr>
+            </tbody>
+          </table>
+
+          <div class="callout warn">
+            <p class="callout-title">易错点</p>
+            <p class="callout-body"><code>Secure</code> 标志会跟随 <code>FRONTEND_ORIGIN</code> 的 scheme:
+              HTTP 自托管场景 (LAN IP) 一旦把 Secure=true 强制设上,浏览器会静默丢弃 cookie,导致登录立刻失效。
+              <a href="../../server/internal/auth/cookie_test.go">cookie_test.go</a> 里 <code>TestSetAuthCookies_HTTPSelfHost</code> 是为了固化这个行为。</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-web-vs-desktop">
+        <summary>① Web 和 Desktop 怎么区分 cookie 模式还是 token 模式?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> 在前端 <a href="../../packages/core/auth/store.ts">auth/store.ts</a> 里通过
+            <code>cookieAuth</code> 选项区分,Web 走 cookie 模式 (浏览器自动带),Desktop / Electron 走 localStorage + Bearer 模式。</p>
+
+          <p><strong>关键差异:</strong></p>
+          <ul>
+            <li><strong>cookieAuth=true (Web)</strong>: <code>initialize()</code> 直接调 <code>api.getMe()</code>,
+              cookie 由浏览器自动附带;前端从来不接触 token 字符串。</li>
+            <li><strong>cookieAuth=false (Desktop)</strong>: 从 localStorage 读 <code>multica_token</code>,
+              手动塞 <code>Authorization: Bearer ...</code>;Desktop 没有共享 cookie 容器。</li>
+          </ul>
+
+          <div class="callout">
+            <p class="callout-title">防御:为什么只在 401 时清 token</p>
+            <p class="callout-body">5xx / 网络断开 / abort <strong>不清</strong> token。这是被
+              <code>#2143 / #2147</code> 教训过的 —— 后端 rolling restart 时如果一抖就清,用户被无差别踢下线。
+              清 token 的责任由 ApiClient 的 <code>onUnauthorized</code> 回调专门承担。</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-cli-login">
+        <summary>② CLI 登录到底登的是什么?token 存哪儿?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> CLI 登的是<strong>一个长期 PAT (<code>mul_</code> 前缀)</strong>,通过浏览器 OAuth-like 回调获取,
+            写到 <code>~/.multica/config.json</code>;之后 CLI 和本地 daemon <strong>共用</strong>这一份 token。</p>
+
+          <p><strong>登录流程</strong> (<a href="../../server/cmd/multica/cmd_auth.go">cmd_auth.go</a> 的 <code>runAuthLogin</code>):</p>
+          <pre class="ascii">1. CLI 起一个本地 HTTP 监听 (loopback 或 LAN IP)
+2. 浏览器打开 web app 的 cli_callback URL
+3. 用户在浏览器里登录 (走 ① 浏览器 session)
+4. 浏览器拿着 cookie 调 /api/tokens 创建一个 PAT (mul_xxx)
+5. 浏览器把 PAT 推到 CLI 的本地回调
+6. CLI 验证 GET /api/me 通了,写入 ~/.multica/config.json</pre>
+
+          <p><strong>配置文件</strong> (<a href="../../server/internal/cli/config.go">cli/config.go</a>):</p>
+          <pre><code>// ~/.multica/config.json (默认 profile)
+{
+  "server_url":   "https://api.multica.ai",
+  "app_url":      "https://multica.ai",
+  "workspace_id": "uuid",       // 当前默认工作区
+  "token":        "mul_xxxx"    // PAT
+}</code></pre>
+
+          <p>支持 <strong>profile 隔离</strong>:<code>--profile staging</code> →
+            <code>~/.multica/profiles/staging/config.json</code>。生产 / staging / 自托管可同时存在。</p>
+
+          <p>临时覆盖:CI 场景下用环境变量 <code>MULTICA_TOKEN=mul_xxx</code>,优先级高于配置文件。</p>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-token-prefix">
+        <summary>② 三种 token (<code>mul_</code> / <code>mdt_</code> / JWT) 分别是什么?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> 看前缀分流。<a href="../../server/internal/auth/jwt.go">auth/jwt.go</a> 里 <code>Generate*Token</code> 各自负责生成。</p>
+
+          <table>
+            <thead><tr><th>前缀</th><th>类型</th><th>谁创建</th><th>谁吊销</th><th>用在哪</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>mul_</code></td>
+                <td>Personal Access Token (PAT)</td>
+                <td>用户:CLI <code>multica login</code> 自动建一条;或 web 设置页手建</td>
+                <td>用户撤销 / 过期 (DB 中心化吊销)</td>
+                <td>CLI、daemon、第三方脚本</td>
+              </tr>
+              <tr>
+                <td><code>mdt_</code></td>
+                <td>Daemon Token</td>
+                <td>服务端在 daemon 注册时分配</td>
+                <td>daemon 注销 / 过期 (DB 中心化吊销)</td>
+                <td>仅 daemon ↔ 后端的高频心跳路径</td>
+              </tr>
+              <tr>
+                <td>(无前缀)</td>
+                <td>JWT</td>
+                <td>Login handler 颁发</td>
+                <td><strong>仅靠过期</strong>,无中心化吊销</td>
+                <td>浏览器 cookie / Desktop bearer</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p>PAT 和 daemon token 数据库里只存 SHA-256 hash (<code>token_hash</code>),
+            明文在签发时只露面一次;若用户丢失只能重新生成。</p>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-auth-middleware">
+        <summary>② 服务端怎么校验这三种 token?为什么有两套 middleware?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> 普通 API 用 <a href="../../server/internal/middleware/auth.go">middleware/auth.go</a>,
+            daemon 专用通道 <code>/api/daemon/*</code> 用 <a href="../../server/internal/middleware/daemon_auth.go">daemon_auth.go</a>。
+            两者都按 token 前缀分流,daemon 通道额外接 Redis 缓存来扛心跳压力。</p>
+
+          <h4 style="margin: 12px 0 6px; font-size: 13px; font-weight: 500;">Auth (普通 API)</h4>
+          <p>优先级:</p>
+          <ol>
+            <li><code>Authorization: Bearer xxx</code> (Desktop / 第三方调用)</li>
+            <li><code>multica_auth</code> HttpOnly cookie (浏览器)</li>
+          </ol>
+          <p>走到 <strong>cookie 分支会额外验 CSRF</strong> (state-changing 方法必须带 <code>X-CSRF-Token</code>);
+            走 Bearer 不需要 CSRF,因为 PAT/JWT 不会被浏览器自动跨站发出。</p>
+
+          <h4 style="margin: 12px 0 6px; font-size: 13px; font-weight: 500;">DaemonAuth (/api/daemon/*)</h4>
+          <p>按 token 前缀分流到三条路径:</p>
+          <ul>
+            <li><code>mdt_</code> → 查 <code>daemon_tokens</code> 表 + Redis 缓存</li>
+            <li><code>mul_</code> → 查 <code>personal_access_tokens</code> 表 + Redis 缓存</li>
+            <li>否则 → JWT 解析 (向后兼容旧 daemon)</li>
+          </ul>
+
+          <div class="callout ok">
+            <p class="callout-title">为什么 daemon 通道单独有缓存</p>
+            <p class="callout-body">daemon 心跳约 15s 一次,缓存命中后 <strong>完全跳过 DB</strong>
+              (包括 <code>last_used_at</code> 的 UPDATE 都跳了),把每请求一次 DB 折算成
+              <strong>每 10 分钟一次</strong> (<code>AuthCacheTTL</code>)。这是性能要害;
+              副作用是 <strong>吊销延迟上限 = 缓存 TTL</strong>,最多 10 分钟。</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-daemon-login">
+        <summary>② Daemon 怎么登录?为什么 <code>multica daemon start</code> 会报"not authenticated"?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> Daemon <strong>不会单独登录</strong>。它读取 CLI 写的同一份
+            <code>~/.multica/config.json</code>,继承 PAT。所以必须先 <code>multica login</code>。</p>
+
+          <p><strong>关键代码:</strong> <a href="../../server/internal/daemon/daemon.go">daemon/daemon.go</a> 的
+            <code>resolveAuth()</code> 读取 profile config,把 <code>cfg.Token</code> 注入到 daemon HTTP client。</p>
+
+          <p>报错原文:</p>
+          <pre><code>not authenticated — run 'multica login' to authenticate, then restart the daemon</code></pre>
+
+          <p>使用 profile 时:<code>multica login --profile staging</code> 之后再
+            <code>multica daemon start --profile staging</code>。</p>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-chat-session-id">
+        <summary>③ <code>chat_session.id</code> 和 <code>chat_session.session_id</code> 不是一回事吗?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> 不是。<code>id</code> 是 Multica 自己分配的 UUID 主键 (Multica 内部对话 id);
+            <code>session_id</code> 是 <strong>Claude Code 内部生成的 session id</strong>,用作
+            <code>claude --resume &lt;session_id&gt;</code> 的"续聊锚点"。</p>
+
+          <table>
+            <thead><tr><th>字段</th><th>类型</th><th>含义</th><th>什么时候被填</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>chat_session.id</code></td>
+                <td>UUID</td>
+                <td>Multica 自己的对话主键</td>
+                <td>建会话时立即生成</td>
+              </tr>
+              <tr>
+                <td><code>chat_session.session_id</code></td>
+                <td>TEXT (nullable)</td>
+                <td>外部 agent (Claude Code) 的 resume 句柄</td>
+                <td>第一次 agent 真正跑过之后才被回填</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p>把 <code>session_id IS NULL</code> 当作"对话还没真正开过"的语义。</p>
+
+          <p><strong>关键代码:</strong></p>
+          <ul>
+            <li><a href="../../server/migrations/033_chat.up.sql">033_chat.up.sql</a> — 表结构</li>
+            <li><a href="../../server/pkg/db/queries/chat.sql">chat.sql</a> 的 <code>CreateChatSession</code> /
+              <code>UpdateChatSessionSession</code> / <code>GetLastChatTaskSession</code></li>
+          </ul>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-chat-resume">
+        <summary>③ Chat 会话的"对话记忆"是怎么不丢的?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> 三层防护:① <code>UpdateChatSessionSession</code> 用 <code>COALESCE</code> 写回,
+            空值不会覆盖已有指针;② 即使 chat_session.session_id 是 NULL,会走 <code>GetLastChatTaskSession</code>
+            从 <code>agent_task_queue</code> 捞最近一条带 session_id 的任务 (<strong>包括失败任务</strong>) 来 resume;
+            ③ 删除前必须先取消 in-flight task,避免"答案没地方落"。</p>
+
+          <p><strong>关键设计 (chat.sql 注释原文):</strong></p>
+          <div class="callout">
+            <p class="callout-body">"even a failed task may have established a real agent session before failing,
+              and we'd rather resume there than start over and lose conversation memory."</p>
+          </div>
+
+          <p>所以即使单次 agent 任务崩溃,只要它在崩溃前已经向后端报告过 session_id,下一条用户消息就能续上记忆。</p>
+
+          <p><strong>删除流程</strong>(<a href="../../server/pkg/db/queries/chat.sql">chat.sql</a>
+            <code>DeleteChatSession</code> 注释):</p>
+          <ol>
+            <li><code>LockChatSessionForDelete</code> 锁住行</li>
+            <li><code>CancelAgentTasksByChatSession</code> 把 in-flight 任务取消</li>
+            <li><code>DeleteChatSession</code> 硬删,<code>chat_message</code> 走 FK CASCADE 一起删;
+              <code>agent_task_queue.chat_session_id</code> 走 SET NULL 保留历史</li>
+          </ol>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-csrf-bearer">
+        <summary>跨议题:为什么 CSRF 只在 cookie 模式下生效,Bearer 不需要?</summary>
+        <div class="faq-body">
+          <p><strong>一句话:</strong> CSRF 攻击的前提是浏览器自动带 cookie 跨站发请求。Bearer token 必须由 JS 主动设置,
+            不会被跨站盗用,所以 PAT/Bearer 路径天然免疫。</p>
+
+          <p>这就是 <a href="../../server/internal/middleware/auth.go">middleware/auth.go</a> 里
+            <code>fromCookie &amp;&amp; !auth.ValidateCSRF(r)</code> 这条只在 cookie 分支启用的原因。
+            Desktop 走 Bearer,不需要前端额外维护 CSRF token。</p>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-revocation-latency">
+        <summary>跨议题:撤销一个 token 后多久真正失效?</summary>
+        <div class="faq-body">
+          <p><strong>取决于 token 类型和路径:</strong></p>
+          <table>
+            <thead><tr><th>Token 类型</th><th>吊销方式</th><th>实际失效时延</th></tr></thead>
+            <tbody>
+              <tr><td>JWT (浏览器 / Desktop)</td><td>无中心化吊销</td><td>= 剩余 TTL (默认 30 天)</td></tr>
+              <tr><td>PAT (<code>mul_</code>) — 普通 API</td><td>DB 标记 revoked</td><td>立即 (Auth 中间件每次查 DB) 或 ≤ <code>AuthCacheTTL</code> (缓存命中)</td></tr>
+              <tr><td>PAT (<code>mul_</code>) — daemon 通道</td><td>DB 标记 revoked</td><td>≤ 10 分钟 (<code>AuthCacheTTL</code>)</td></tr>
+              <tr><td>Daemon token (<code>mdt_</code>)</td><td>DB 删除</td><td>≤ 10 分钟 (<code>AuthCacheTTL</code>)</td></tr>
+            </tbody>
+          </table>
+
+          <p>所以 <strong>JWT 不能用作"安全敏感操作"的唯一凭据</strong>,例如改邮箱、改密码这类操作通常会再补一道密码 / 验证码确认。</p>
+        </div>
+      </details>
+
+      <details class="faq-item" id="q-mental-traps">
+        <summary>把这些常被混淆的概念列一下</summary>
+        <div class="faq-body">
+          <ol>
+            <li><strong>"session" 三个含义</strong>:浏览器里的 session (① cookie 内 JWT)、
+              CLI 的 session (② PAT 写在 config.json)、chat_session (③ DB 行 + agent 内部 session_id) —
+              第三个跟登录无关。</li>
+            <li><strong>JWT vs PAT</strong>:看前缀。<code>mul_</code> / <code>mdt_</code> 走 token hash 查表;
+              其它走 JWT 解析。JWT 没有中心化吊销,PAT/Daemon token 可主动 revoke。</li>
+            <li><strong>CSRF 只对 cookie 路径生效</strong>:cookie 是浏览器自动带的,会被 CSRF 攻击;
+              Bearer 必须 JS 主动设置,不会被跨站盗用。</li>
+            <li><strong><code>chat_session.session_id</code> 和 <code>chat_session.id</code> 是两码事</strong>:
+              前者是 Claude Code 自己生成的 resume 句柄,后者是 Multica 自己分配的 UUID。
+              把 NULL session_id 当成"对话还没真正开过"的语义。</li>
+            <li><strong>Daemon 不会单独登录</strong>:它共用 CLI 写的那份 PAT;想让 daemon 跑必须先
+              <code>multica login</code>。</li>
+          </ol>
+        </div>
+      </details>
+
+    </div>
+  </section>
+
+  <footer>
+    维护者: 文档相关问题请直接修改 <code>docs/faq/index.html</code>。
+    新增 FAQ 章节时请在顶部"目录"补一行链接,并保持 <code>id</code> 命名为
+    <code>topic-name</code> (锚点格式) 与 <code>q-question-key</code> (单条 FAQ)。
+  </footer>
+
+</div>
+</body>
+</html>

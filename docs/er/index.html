@@ -64,6 +64,26 @@
   .ent-table th.col-table { width: 220px; }
   .ent-table th.col-tag { width: 100px; }
   .ent-table td.col-table { font-family: var(--font-mono); font-size: 12px; }
+
+  /* 每张 ER 图下方的"表用途速记"小表 */
+  .er-purpose { margin-top: 12px; }
+  .er-purpose summary {
+    cursor: pointer;
+    color: var(--fg-muted);
+    font-size: 12px;
+    padding: 6px 0;
+    user-select: none;
+    list-style: none;
+  }
+  .er-purpose summary::-webkit-details-marker { display: none; }
+  .er-purpose summary::before { content: "▸ "; color: var(--fg-subtle); }
+  .er-purpose[open] summary::before { content: "▾ "; }
+  .er-purpose summary:hover { color: var(--fg); }
+  .er-purpose table { margin-top: 8px; font-size: 13px; }
+  .er-purpose th.col-table { width: 200px; }
+  .er-purpose td.col-table { font-family: var(--font-mono); font-size: 12px; vertical-align: top; }
+  .er-purpose td.col-purpose { color: var(--fg); }
+  .er-purpose td.col-purpose .scene { color: var(--fg-muted); display: block; margin-top: 2px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -296,6 +316,22 @@
         ④ 几乎所有其它表的访问控制起点是 <code>middleware/workspace.go</code> 解析 slug → 注入 <code>workspace_id</code>。
       </p>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这 8 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">users</td><td class="col-purpose">平台账号本体（跨工作区共享）。<span class="scene">登录态、用户偏好（语言 / 时区 / onboarding 进度 / starter_content）都挂在这里；通过 members 才能进入某个 workspace。</span></td></tr>
+          <tr><td class="col-table">workspaces</td><td class="col-purpose">租户根；几乎所有业务表的 <code>workspace_id</code> 都指向它。<span class="scene">承载 issue 编号前缀 / 计数器、settings、绑定的 repos；slug 是 URL 上的唯一标识，受 <code>reserved_slugs.json</code> 保护。</span></td></tr>
+          <tr><td class="col-table">members</td><td class="col-purpose">user × workspace × role 的关联表，决定谁能进、能做什么。<span class="scene"><code>middleware/workspace.go</code> 每次请求都按它做权限校验；role ∈ {owner, admin, member}。</span></td></tr>
+          <tr><td class="col-table">workspace_invitations</td><td class="col-purpose">把外部邮箱拉进工作区的邀请单。<span class="scene">同一工作区 + 邮箱同时只能有一条 pending（部分唯一索引）；默认 7 天过期；接受后落到 members。</span></td></tr>
+          <tr><td class="col-table">personal_access_tokens (PAT)</td><td class="col-purpose">用户用于 CLI / 脚本调用 API 的长期令牌。<span class="scene">只存 <code>token_hash</code>，前缀 <code>token_prefix</code> 用于列表展示；<code>revoked</code> 与 <code>last_used_at</code> 支持审计与撤销。</span></td></tr>
+          <tr><td class="col-table">daemon_tokens</td><td class="col-purpose">本地 daemon 进程登录后端的工作区级令牌。<span class="scene">与 PAT 同样只存 hash；按 <code>(workspace_id, daemon_id)</code> 关联到具体机器；过期即作废。</span></td></tr>
+          <tr><td class="col-table">verification_codes</td><td class="col-purpose">邮箱验证码（登录 / 注册入口）。<span class="scene"><code>used</code> 保证一次性，过期即作废；后续迁移加了 attempts 字段防爆破。</span></td></tr>
+          <tr><td class="col-table">notification_preferences</td><td class="col-purpose">用户在某工作区下的通知偏好（JSONB 存细分开关）。<span class="scene">控制 inbox / 邮件 / WS 推送是否触达；按 <code>(workspace_id, user_id)</code> UNIQUE。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ② Issue 域 ========== -->
@@ -488,6 +524,26 @@
         ④ <code>activity_logs.details</code> 是 JSONB,结构按 <code>action</code> 分支变化,用 <code>format-activity</code> 在前端格式化。
       </p>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这 12 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">issues</td><td class="col-purpose">协作核心实体：一条任务 / Bug / 需求。<span class="scene">承载状态机、优先级、指派人（可指给 user / agent / squad）、父子关系、所属 project；每条 issue 在工作区内有唯一编号 <code>{prefix}-{number}</code>。</span></td></tr>
+          <tr><td class="col-table">issue_dependency</td><td class="col-purpose">issue 之间的依赖 / 阻塞 / 关联关系。<span class="scene"><code>type ∈ {blocks, blocked_by, related}</code>；驱动列表上的"被阻塞"提示与依赖图。</span></td></tr>
+          <tr><td class="col-table">issue_labels</td><td class="col-purpose">工作区级标签字典（名字 + 颜色）。<span class="scene">设置页 / labels 视图 CRUD；删除时通过 <code>issue_to_label</code> 级联清理。</span></td></tr>
+          <tr><td class="col-table">issue_to_label</td><td class="col-purpose">issue ↔ label 的多对多关联表。<span class="scene">复合主键 (issue_id, label_id)；issue 列表过滤的核心 join。</span></td></tr>
+          <tr><td class="col-table">issue_subscribers</td><td class="col-purpose">谁会收到这条 issue 的通知。<span class="scene">由 creator / assignee / commenter / mentioned / manual 五种 reason 自动落项；inbox 派发以此为分发名单。</span></td></tr>
+          <tr><td class="col-table">issue_reactions</td><td class="col-purpose">issue 维度的 emoji 反应。<span class="scene">按 (issue_id, actor, emoji) UNIQUE，再点一次即取消。</span></td></tr>
+          <tr><td class="col-table">comments</td><td class="col-purpose">issue 评论 / 系统消息流。<span class="scene"><code>type</code> 区分 comment / system / status_change 等；<code>parent_id</code> 自引用做嵌套；<code>resolved_at</code> 支持 review 风格的"已解决线程"。</span></td></tr>
+          <tr><td class="col-table">comment_reactions</td><td class="col-purpose">comment 维度的 emoji 反应。<span class="scene">结构与 issue_reactions 同形，承担同样的轻量交互。</span></td></tr>
+          <tr><td class="col-table">attachments</td><td class="col-purpose">所有上传的文件 / 图片元数据。<span class="scene">同时可挂在 issue / comment / chat_session / chat_message（迁移 083 加 chat 列）；二进制本体走 S3 或本地 storage。</span></td></tr>
+          <tr><td class="col-table">activity_logs</td><td class="col-purpose">issue 上发生的所有可审计动作流水。<span class="scene">驱动 issue 详情页右侧 timeline；<code>details</code> 按 action 自由组织（status_change / assignee_change / comment / pr_linked …）。</span></td></tr>
+          <tr><td class="col-table">projects</td><td class="col-purpose">把若干 issues 聚合成一个交付目标。<span class="scene">有自己的 status / priority / lead；issue 通过 <code>project_id</code> 落到某个 project。</span></td></tr>
+          <tr><td class="col-table">project_resources</td><td class="col-purpose">project 关联的外部资源指针（github_repo / 链接 / 文档）。<span class="scene"><code>resource_type</code> 自由字符串 + <code>resource_ref</code> JSONB，新增类型零 schema 改动；同 project 内 (type, ref) UNIQUE 防重复。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ③ Agent / Task 域 ========== -->
@@ -676,6 +732,27 @@
         ④ <code>skills</code> 与 <code>agent_skill</code> 多对多;<code>skill_files</code> 让一个 skill 可以承载多文件(如多步骤 prompt + 模板)。
       </p>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这一域的 12 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">agents</td><td class="col-purpose">一个可被指派的 AI agent 配置。<span class="scene">承载 model / instructions / 自定义 env / args / MCP 配置 / 并发上限 / 可见性（workspace 公共 vs 私有）；<code>archived_at</code> 软归档。</span></td></tr>
+          <tr><td class="col-table">agent_runtime</td><td class="col-purpose">agent 实际跑在哪台机器上的"运行时节点"。<span class="scene">本地 daemon 与云端 runtime 都在这里登记；<code>last_seen_at</code> + <code>status</code> 决定 agent 是否在线；带 timezone / visibility，多 daemon 同一 workspace 各一行。</span></td></tr>
+          <tr><td class="col-table">agent_skill</td><td class="col-purpose">agent ↔ skill 的多对多关联。<span class="scene">复合主键 (agent_id, skill_id)；agent 派单时把绑定的 skill 注入 prompt。</span></td></tr>
+          <tr><td class="col-table">agent_task_queue ⭐</td><td class="col-purpose">Agent 业务的中枢：任务的全生命周期记录。<span class="scene">queued → dispatched → running → completed/failed/cancelled；同时挂 issue_id / chat_session_id / autopilot_run_id 三种来源；<code>parent_task_id</code>+<code>is_leader_task</code> 支撑 squad 二级派单；带 lease 与 retry。</span></td></tr>
+          <tr><td class="col-table">task_messages</td><td class="col-purpose">单次 task 内 agent 的工具调用 / 思考流水。<span class="scene">按 (task_id, seq) 顺序索引；<code>type / tool / input / output</code> 还原"agent 这一步在做什么"，是详情页 timeline 的数据源。</span></td></tr>
+          <tr><td class="col-table">task_usage</td><td class="col-purpose">单次 task 的 token 计量明细（按 provider × model）。<span class="scene">input/output/cache_read/cache_write 四列；<code>(task_id, provider, model)</code> UNIQUE，便于多模型混合调用时分别累加。</span></td></tr>
+          <tr><td class="col-table">task_usage_daily<span class="scene">（图中标为 task_usage_hourly）</span></td><td class="col-purpose">按 (date × workspace × runtime × provider × model) 维度的物化聚合。<span class="scene">驱动 runtimes 列表的成本格 / 详情页的用量曲线，避免每次 SUM 全表。</span></td></tr>
+          <tr><td class="col-table">task_usage_dashboard_daily</td><td class="col-purpose">面向 dashboard 的另一组聚合（按 workspace × project × agent × date）。<span class="scene">dashboard 团队 / 项目维度的开销视图依赖它，与上一张索引取向不同。</span></td></tr>
+          <tr><td class="col-table">task_usage_*_dirty</td><td class="col-purpose">需要重算的聚合 bucket 标记表。<span class="scene">trigger 在 task_usage / agent_task_queue 写入时入队脏 bucket；rollup worker 定时把 dirty 行重算掉，避免实时聚合写放大。</span></td></tr>
+          <tr><td class="col-table">task_usage_*_rollup_state</td><td class="col-purpose">单行水位线表，记录 rollup worker 跑到哪儿了。<span class="scene"><code>watermark_at</code> + 上次结果 + 错误信息；幂等窗口推进。</span></td></tr>
+          <tr><td class="col-table">daemon_connection</td><td class="col-purpose">daemon 进程与某个 agent 的连接 / 心跳记录。<span class="scene"><code>last_heartbeat_at</code> + <code>status ∈ {connected, disconnected}</code>；调度器据此判断能否派单到本地。</span></td></tr>
+          <tr><td class="col-table">skills</td><td class="col-purpose">workspace 级技能定义（name + description + content + config）。<span class="scene">类似"agent 的可复用技能包"，可被多个 agent 绑定；按 (workspace_id, name) UNIQUE。</span></td></tr>
+          <tr><td class="col-table">skill_files</td><td class="col-purpose">skill 内的多文件（path × content）。<span class="scene">允许一个 skill 承载多个 prompt / 模板 / 资源文件；按 (skill_id, path) UNIQUE。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ④ Squad ========== -->
@@ -716,6 +793,16 @@
       </svg>
       <figcaption>Squad ER 图 · 2 张表 + 跨域 FK</figcaption>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这 2 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">squads</td><td class="col-purpose">把多个 agent 组成一个可被 @ 提及 / 指派的"团队"。<span class="scene"><code>leader_id</code> 强外键到某个 agent —— leader 负责把传入任务路由到合适的 member（迁移 084 同时把 issue.assignee_type 扩展到支持 squad）；<code>archived_at</code> 软归档；name 不做工作区内 UNIQUE（迁移 087）。</span></td></tr>
+          <tr><td class="col-table">squad_members</td><td class="col-purpose">某个 squad 下的成员（agent / user 多态，目前主用 agent）。<span class="scene">复合 UNIQUE (squad_id, member_type, member_id) 防重复；<code>role</code> 字段保留语义扩展位（如 reviewer / executor）。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ⑤ Autopilot ========== -->
@@ -803,6 +890,18 @@
         <code>signing_secret</code> 与 <code>signature_status</code> 用于校验 GitHub / Gitlab 等外部 webhook 真实性。
       </p>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这 4 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">autopilots</td><td class="col-purpose">一条"自动开工规则"：把某 agent 配置成可被定时 / webhook 触发。<span class="scene"><code>execution_mode ∈ {create_issue, run_only}</code> 决定要不要先建 issue；<code>concurrency_policy ∈ {skip, queue, replace}</code> 控制重叠运行；status ∈ {active, paused, archived}。</span></td></tr>
+          <tr><td class="col-table">autopilot_triggers</td><td class="col-purpose">绑定到 autopilot 的触发源（schedule / webhook / api）。<span class="scene">schedule 走 <code>cron_expression</code> + <code>next_run_at</code>（部分索引只覆盖 enabled+schedule）；webhook 携带 <code>provider</code> + <code>signing_secret</code> 做签名校验。</span></td></tr>
+          <tr><td class="col-table">autopilot_runs</td><td class="col-purpose">一次实际触发的执行记录。<span class="scene">link 到本次创建的 issue / 派生的 task；status ∈ {pending, issue_created, running, skipped, completed, failed}；保留 <code>trigger_payload</code> 与 <code>result</code>。</span></td></tr>
+          <tr><td class="col-table">webhook_deliveries</td><td class="col-purpose">每个外部 webhook 入站请求的"原始投递档"，与 run 解耦。<span class="scene"><code>dedupe_key</code>（GitHub 用 X-GitHub-Delivery、generic 用 Idempotency-Key）防重放；保留 <code>raw_body</code> 用于 replay；<code>replayed_from_delivery_id</code> 支持手工重放。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ⑥ Chat ========== -->
@@ -853,6 +952,16 @@
       </svg>
       <figcaption>Chat ER 图 · 2 张表 + 跨域 FK</figcaption>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这 2 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">chat_sessions</td><td class="col-purpose">用户与某 agent 的一条持久会话。<span class="scene">绑定 (workspace, agent, creator, runtime)；<code>session_id</code> 是 CLI / 终端会话锚点；<code>work_dir</code> 记录会话的工作目录；<code>unread_since</code> 控制未读小红点。</span></td></tr>
+          <tr><td class="col-table">chat_messages</td><td class="col-purpose">会话内每条消息（user / assistant）。<span class="scene">每条 user 消息会派生一个 <code>agent_task_queue</code> 任务（通过 <code>task_id</code> 反向回溯）；<code>elapsed_ms</code> 记录响应耗时；<code>failure_reason</code> 携带错误归类。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ⑦ Inbox / Pin / Notification ========== -->
@@ -892,6 +1001,16 @@
       </svg>
       <figcaption>Inbox / Pin ER 图 · 2 张表(+ notification_preferences 在身份域)</figcaption>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这 2 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">inbox_items</td><td class="col-purpose">面向某个 user / agent 的"通知收件箱"。<span class="scene"><code>recipient_{type,id}</code> 多态收件人；<code>severity ∈ {action_required, attention, info}</code> 决定红点等级；<code>read</code> + <code>archived</code> 双标志；<code>details</code> JSONB 携带场景化数据（被指派、被 mention、PR 状态变化等）。</span></td></tr>
+          <tr><td class="col-table">pinned_items</td><td class="col-purpose">用户在侧栏的快捷收藏。<span class="scene"><code>item_type ∈ {issue, project}</code>，按 (workspace_id, user_id, item_type, item_id) UNIQUE；<code>position</code> 浮点排序，便于拖拽插入而不重排。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ⑧ GitHub ========== -->
@@ -959,6 +1078,18 @@
       </svg>
       <figcaption>GitHub 集成 ER 图 · 4 张表 · 串到 issues</figcaption>
     </div>
+    <details class="er-purpose" open>
+      <summary>表用途速记 — 这 4 张表分别是干什么的</summary>
+      <table>
+        <thead><tr><th class="col-table">表</th><th class="col-purpose">一句话用途 + 关键场景</th></tr></thead>
+        <tbody>
+          <tr><td class="col-table">github_installations</td><td class="col-purpose">已连接到 workspace 的 GitHub App 安装。<span class="scene"><code>installation_id</code> 全局 UNIQUE；记录连接发起人 <code>connected_by_id</code>；后端用它换 GitHub access token。</span></td></tr>
+          <tr><td class="col-table">github_pull_requests</td><td class="col-purpose">本地镜像的 PR 元数据（不是 PR diff）。<span class="scene">按 (workspace_id, repo, pr_number) UNIQUE；<code>state ∈ {open, closed, merged, draft}</code>；带 <code>head_sha</code> + <code>mergeable_state</code>，提供合并冲突 / CI 状态视图。</span></td></tr>
+          <tr><td class="col-table">github_pull_request_check_suites</td><td class="col-purpose">PR 的 CI Check Suite 状态镜像。<span class="scene">按 (pr_id, suite_id) 主键；查询时用 <code>head_sha</code> 过滤，避免老 sha 的 suite 污染当前视图（迁移 091 设计要点）。</span></td></tr>
+          <tr><td class="col-table">issue_pull_requests</td><td class="col-purpose">issue ↔ PR 的多对多关联。<span class="scene">复合主键 (issue_id, pull_request_id)；记录 <code>linked_by_{type,id}</code> 与时间，issue 详情页据此显示挂着的 PR。</span></td></tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 
   <!-- ========== ⑨ 杂项 ========== -->
