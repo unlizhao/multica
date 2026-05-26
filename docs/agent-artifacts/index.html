@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -551,6 +551,349 @@ if len(artifacts) > 0 {
             + 自动回流评论 + 注入下一轮 prompt + 前端清单组件 — <strong>4 步独立可上线,每一步纯加法、零回归</strong>。</p>
           <p><strong>MVP (Step 1)</strong>:1 个 migration + 1 个 sqlc query + 1 个 提取器 + 1 个 handler,
             即可让"产物"成为系统一等公民。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item" open>
+      <summary>Step 1+ — 自动上传到 FDS(把 agent 产生的文件/图片自动入库)</summary>
+      <div class="faq-body">
+        <p><strong>动机</strong>:Step 1 解决了"产物 URL 索引化",但对 <strong>agent 在执行过程中生成的本地文件</strong>(<code>Write</code>/<code>Edit</code>/<code>Bash python plot.py</code>)
+          只能记 file_path,不能让用户/前端实际看到。<strong>Step 1+</strong> 在提取器后追加一个 worker:
+          检测到 file/image kind 时自动把二进制传到自建 FDS,把 fds_url 写回 artifact + attachment 双表。</p>
+
+        <h4>4 类典型场景的处理路径</h4>
+        <table>
+          <thead>
+            <tr><th>场景</th><th>来源</th><th>处理方式</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>① <code>Write(file=docs/arch.png)</code></td><td>agent 工作区本地磁盘</td><td>读取文件 → 上传 FDS → 写双表</td></tr>
+            <tr><td>② <code>mcp__dalle__generate</code> 返回临时 URL</td><td>外部 CDN(24h 过期)</td><td>下载二进制 → 上传 FDS → 写双表(metadata 保留 original_url)</td></tr>
+            <tr><td>③ <code>Bash(python plot.py)</code> → <code>/tmp/chart.png</code></td><td>daemon 机器临时目录</td><td><strong>不处理</strong>(没有显式 tool_use,看不到产物)</td></tr>
+            <tr><td>④ agent 主动调 <code>multica attachment upload</code> CLI</td><td>已有路径</td><td>沿用现有 attachment 链路,artifact 通过 metadata.attachment_id 关联</td></tr>
+          </tbody>
+        </table>
+
+        <h4>架构图</h4>
+        <pre class="ascii">
++-------------------------------------+
+| daemon: stream-json 解析            |
++----------+--------------------------+
+           | tool_use / tool_result
+           v
++-------------------------------------+
+| extractArtifacts (Step 1)           |
++----------+--------------------------+
+           | ArtifactCandidate
+           v
++-------------------------------------+
+| ★ uploadWorker (Step 1+,新增)      |
+|   case kind == "file":              |
+|     readLocalFile(workDir+path)     |
+|   case kind == "image" && http://...|
+|     httpGet(location)               |
+|   case other:                       |
+|     skip                            |
+|   ↓                                 |
+|   POST /api/daemon/upload-file      |
+|     (multipart, 走 daemon token)    |
++----------+--------------------------+
+           | fds_url + attachment_id
+           v
++-------------------------------------+
+| ReportArtifacts (server)            |
+|   metadata: {                       |
+|     fds_url, attachment_id,         |
+|     original_url (如果是②)          |
+|   }                                 |
+|   并: CreateAttachment(            |
+|     uploader_type="agent",         |
+|     uploader_id=task.AgentID,      |
+|     issue_id, url=fds_url, ...)     |
++-------------------------------------+
+        </pre>
+
+        <h4>关键点</h4>
+        <div class="callout warn">
+          <p><strong>1) 复用现有 Storage 接口</strong>:
+            <code>server/internal/storage/storage.go</code> 已抽象 <code>Storage.Upload(ctx, key, data, contentType, filename) (url, err)</code>,
+            自建 FDS 部署只要实现这个接口,daemon 通过 server 中转上传 — <strong>daemon 不直连 FDS</strong>(避免 daemon 持有 FDS 凭据)。</p>
+
+          <p><strong>2) 新增 daemon 专用上传端点</strong>:
+            <code>POST /api/daemon/upload-file</code>(走 DaemonAuth 中间件,不是用户 JWT)。
+            参考已有 <code>UploadFile</code> handler(<code>handler/file.go</code> L139),把 <code>userID</code> 换成 <code>task.AgentID</code> +
+            <code>uploader_type="agent"</code>。</p>
+
+          <p><strong>3) 大小/类型白名单</strong>:agent 工作区可能有几百 MB 的 build 产物、node_modules,绝不能全传。
+            必须在 worker 里加:
+            <ul>
+              <li>大小上限(建议 20MB,和 maxUploadSize 一致)</li>
+              <li>类型白名单(image/* / pdf / svg / 文本 < 1MB),其它走"只记 location 不传 FDS"</li>
+              <li>文件名 / 路径黑名单(<code>node_modules</code> / <code>.git</code> / <code>dist</code> / <code>build</code>)</li>
+            </ul>
+          </p>
+
+          <p><strong>4) 异步 + best-effort</strong>:上传失败<strong>不影响</strong> task 完成。
+            artifact 至少先入库(只记 location,fds_url 留空),后续可以补传(单独的 worker 扫
+            <code>WHERE metadata-&gt;'fds_url' IS NULL AND created_at &gt; now() - interval '1 hour'</code>)。</p>
+
+          <p><strong>5) 幂等</strong>:同 task 同 location 不重复上传(artifact 表 UNIQUE 约束已保证),
+            上传前先查 <code>ListArtifactsByTask</code>,有 fds_url 则跳过。</p>
+        </div>
+
+        <h4>需要新建/修改的文件清单</h4>
+        <table>
+          <thead><tr><th>文件</th><th>动作</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>server/internal/daemon/artifact_uploader.go</code></td><td><strong>新建</strong></td><td>uploadWorker 主体,~200 行</td></tr>
+            <tr><td><code>server/internal/handler/file.go</code></td><td>修改</td><td>追加 <code>UploadFileFromDaemon</code> handler(DaemonAuth)</td></tr>
+            <tr><td><code>server/cmd/server/router.go</code></td><td>修改</td><td>注册 <code>POST /api/daemon/upload-file</code></td></tr>
+            <tr><td><code>server/internal/daemon/client.go</code></td><td>修改</td><td>追加 <code>UploadDaemonFile(ctx, taskID, data, filename, contentType)</code></td></tr>
+            <tr><td><code>server/internal/daemon/daemon.go</code></td><td>修改</td><td>在 extractArtifacts 后投递到 uploader 异步队列</td></tr>
+            <tr><td><code>agent_artifact</code> 表</td><td>不改 schema</td><td>fds_url / attachment_id / original_url 全部存 jsonb metadata</td></tr>
+          </tbody>
+        </table>
+
+        <h4>uploadWorker 伪代码</h4>
+        <pre><code>// artifact_uploader.go (新建)
+type ArtifactUploader struct {
+    client    *Client          // daemon → server 上传通道
+    queue     chan uploadJob
+    workDir   string           // agent 工作区根
+    maxSize   int64            // 默认 20MB
+    typeAllow []string         // image/* / pdf / svg / text
+}
+
+type uploadJob struct {
+    taskID   string
+    artifact *ArtifactCandidate  // 指针,允许回填 metadata
+}
+
+func (u *ArtifactUploader) Submit(taskID string, a *ArtifactCandidate) {
+    select {
+    case u.queue &lt;- uploadJob{taskID, a}:
+    default:
+        // 队列满,降级为只记 location 不传 FDS
+        slog.Warn("artifact upload queue full, skipping", "task", taskID)
+    }
+}
+
+func (u *ArtifactUploader) run(ctx context.Context) {
+    for job := range u.queue {
+        if err := u.handle(ctx, job); err != nil {
+            slog.Warn("artifact upload failed",
+                "task", job.taskID, "loc", job.artifact.Location, "err", err)
+            // 不重试,等后台兜底 worker 扫
+        }
+    }
+}
+
+func (u *ArtifactUploader) handle(ctx context.Context, job uploadJob) error {
+    // 1) 取二进制
+    var data []byte
+    var filename, contentType string
+
+    switch job.artifact.Kind {
+    case "file":
+        // 路径白名单
+        if isBlacklistedPath(job.artifact.Location) {
+            return nil
+        }
+        full := filepath.Join(u.workDir, job.artifact.Location)
+        info, err := os.Stat(full)
+        if err != nil || info.Size() &gt; u.maxSize { return err }
+        data, err = os.ReadFile(full)
+        if err != nil { return err }
+        filename = filepath.Base(job.artifact.Location)
+        contentType = detectContentType(filename, data)
+
+    case "image":
+        if !strings.HasPrefix(job.artifact.Location, "http") {
+            return nil  // file 类型已在上面分支处理
+        }
+        // 下载临时 URL
+        req, _ := http.NewRequestWithContext(ctx, "GET", job.artifact.Location, nil)
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil { return err }
+        defer resp.Body.Close()
+        data, err = io.ReadAll(io.LimitReader(resp.Body, u.maxSize))
+        if err != nil { return err }
+        filename = "agent-generated-" + shortHash(job.artifact.Location) + ".png"
+        contentType = resp.Header.Get("Content-Type")
+
+    default:
+        return nil  // url / commit / message 等不上传
+    }
+
+    // 2) 类型白名单
+    if !u.typeAllowed(contentType) { return nil }
+
+    // 3) 通过 server 中转上传到 FDS
+    fdsURL, attachmentID, err := u.client.UploadDaemonFile(
+        ctx, job.taskID, data, filename, contentType,
+    )
+    if err != nil { return err }
+
+    // 4) 回填 metadata(注意并发安全,artifact 是指针)
+    if job.artifact.Metadata == nil {
+        job.artifact.Metadata = map[string]any{}
+    }
+    job.artifact.Metadata["fds_url"] = fdsURL
+    job.artifact.Metadata["attachment_id"] = attachmentID
+    if job.artifact.Kind == "image" &amp;&amp; strings.HasPrefix(job.artifact.Location, "http") {
+        job.artifact.Metadata["original_url"] = job.artifact.Location
+    }
+    return nil
+}</code></pre>
+
+        <h4>server 端 daemon 上传 handler 伪代码</h4>
+        <pre><code>// handler/file.go 追加
+// UploadFileFromDaemon — POST /api/daemon/upload-file
+// DaemonAuth 中间件已校验 daemon token + 解出 task,这里只做存储 + 写双表
+func (h *Handler) UploadFileFromDaemon(w http.ResponseWriter, r *http.Request) {
+    if h.Storage == nil {
+        writeError(w, http.StatusServiceUnavailable, "storage not configured")
+        return
+    }
+    // 复用 daemon-task 鉴权
+    taskID := chi.URLParam(r, "taskId")
+    task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+    if !ok { return }
+
+    r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+    if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+        writeError(w, http.StatusBadRequest, "file too large")
+        return
+    }
+    defer r.MultipartForm.RemoveAll()
+
+    file, header, err := r.FormFile("file")
+    if err != nil {
+        writeError(w, http.StatusBadRequest, "missing file")
+        return
+    }
+    defer file.Close()
+    data, _ := io.ReadAll(file)
+    contentType := http.DetectContentType(data[:min(512, len(data))])
+
+    key := h.makeStorageKey(task.WorkspaceID, header.Filename)
+    fdsURL, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
+    if err != nil {
+        writeError(w, http.StatusInternalServerError, "fds upload failed")
+        return
+    }
+
+    // 写 attachment 表,uploader 是 agent
+    att, err := h.Queries.CreateAttachment(r.Context(), db.CreateAttachmentParams{
+        WorkspaceID:  task.WorkspaceID,
+        IssueID:      task.IssueID,         // 自动挂到 issue
+        UploaderType: "agent",
+        UploaderID:   task.AgentID,
+        Filename:     header.Filename,
+        Url:          fdsURL,
+        ContentType:  contentType,
+        SizeBytes:    int64(len(data)),
+    })
+    if err != nil {
+        writeError(w, http.StatusInternalServerError, "create attachment failed")
+        return
+    }
+
+    writeJSON(w, http.StatusOK, map[string]string{
+        "fds_url":       fdsURL,
+        "attachment_id": uuidToString(att.ID),
+    })
+}</code></pre>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1+ — 用户视角效果</summary>
+      <div class="faq-body">
+        <p>方案落地后,issue 详情页会同时出现两种入口:</p>
+        <ol>
+          <li><strong>评论里直接看图</strong>(走 attachment 路径,FDS URL 渲染)
+            <pre><code>**这次任务的产物:**
+- 🖼️ ![architecture diagram](https://fds.yourcompany.com/.../arch.png)
+- 📄 [Q3 飞书报告](https://feishu.cn/docs/abc123)
+- 📦 commit a1b2c3d</code></pre>
+          </li>
+          <li><strong>右侧"产物清单"分组</strong>(走 artifact 路径,kind 分组)
+            <ul>
+              <li>🖼️ 图片(2):点开 lightbox 预览(走 attachment 已有的 lightbox 组件)</li>
+              <li>🔗 链接(3):新窗口打开外部 URL(飞书/Notion/PR)</li>
+              <li>📦 提交(1):跳 git diff</li>
+            </ul>
+          </li>
+        </ol>
+        <p><strong>跨 agent 接力</strong>:下一个 agent 通过 buildIssuePrompt 注入,
+          看到的是 fds_url(图片可直接下载查看)+ 外部 URL(飞书等只能引用),不会丢失任何上下文。</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1+ — 风险与边界</summary>
+      <div class="faq-body">
+        <table>
+          <thead>
+            <tr><th>风险</th><th>缓解</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>R1 工作区大文件全量上传</strong>:Write 了一个 500MB 的二进制</td><td>大小白名单(20MB)+ 类型白名单 + 路径黑名单(node_modules / dist / .git)</td></tr>
+            <tr><td><strong>R2 daemon 网络/磁盘抖动</strong>:上传超时、读文件失败</td><td>异步 worker + 不阻塞 task 完成 + 后台兜底 worker(扫 fds_url IS NULL)</td></tr>
+            <tr><td><strong>R3 agent 写敏感文件</strong>:.env / id_rsa / 密钥文件被自动上传</td><td>路径黑名单 + redact 模式扩展(已有 redact 框架可复用)</td></tr>
+            <tr><td><strong>R4 临时 URL 已过期</strong>:DALL-E 24h 后下载失败</td><td>worker 在产物提取后立即触发(秒级延迟),失败也只是降级为"只有原始 URL"</td></tr>
+            <tr><td><strong>R5 FDS 配额/限流</strong>:大量并发任务打爆 FDS</td><td>uploader 内 channel 容量限制 + token bucket 限速;队列满则降级</td></tr>
+            <tr><td><strong>R6 attachment 表暴增</strong>:每个 task 几十张图</td><td>定期清理 cron(可选):每天扫 7 天前未被 comment 引用的 agent attachment,删 FDS + 删表</td></tr>
+            <tr><td><strong>R7 daemon 持有 FDS 凭据风险</strong></td><td><strong>不让 daemon 直连 FDS</strong>;走 server 中转(<code>POST /api/daemon/upload-file</code>),server 已有 FDS 凭据</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1+ — 上线节奏 / MVP 范围</summary>
+      <div class="faq-body">
+        <table>
+          <thead>
+            <tr><th>子阶段</th><th>范围</th><th>价值</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>1+a (MVP)</strong></td><td>仅处理 <code>kind=file</code> 且后缀为 <code>image/*</code> 的场景<br>(Write 了 png/jpg 自动传 FDS)</td><td>覆盖 80% 高频场景:agent 截图、生成的架构图、matplotlib 图表</td></tr>
+            <tr><td>1+b</td><td>扩展到 pdf / svg / 文本</td><td>支持生成报告类产物</td></tr>
+            <tr><td>1+c</td><td>处理 <code>kind=image</code> 外部 URL 下载(MCP 生图)</td><td>归档 DALL-E 等临时 URL,防止 24h 过期</td></tr>
+            <tr><td>1+d</td><td>后台兜底 worker(补传 fds_url IS NULL 的产物)</td><td>容错保底</td></tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          <p><strong>1+a MVP 估算:</strong></p>
+          <ul>
+            <li>1 个新文件 <code>artifact_uploader.go</code>(~200 行)</li>
+            <li>1 个新 handler <code>UploadFileFromDaemon</code>(~80 行,大量复用 <code>UploadFile</code>)</li>
+            <li>1 处路由注册</li>
+            <li>1 个 <code>client.go</code> 新方法 <code>UploadDaemonFile</code></li>
+            <li>3 处 <code>daemon.go</code> 接线(初始化 uploader / 投递 / shutdown)</li>
+          </ul>
+          <p>核心代码量 ~400 行,与 Step 1(MVP)同时上线最经济 — 用户第一次看到 artifact 清单时就有图片,
+            不会经历"先有清单但点不开图"的尴尬过渡期。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1+ — 一句话总结</summary>
+      <div class="faq-body">
+        <div class="callout">
+          <p><strong>方案</strong>:在 Step 1 提取器之后追加 <code>artifact_uploader</code> 异步 worker —
+            file 类读本地,image 类 URL 下载二进制,经 <code>POST /api/daemon/upload-file</code>(daemon token)
+            中转到自建 FDS,fds_url 同步写入 <code>attachment</code> 表 + 回填 <code>artifact.metadata</code>。</p>
+          <p><strong>核心设计点</strong>:
+            (1) daemon 不持有 FDS 凭据 — 走 server 中转;
+            (2) 复用现有 <code>storage.Storage</code> 抽象 + <code>UploadFile</code> 主体逻辑;
+            (3) 大小/类型/路径三重白黑名单防止全量上传;
+            (4) 异步 + best-effort + 后台兜底,不阻塞 task 完成。</p>
+          <p><strong>1+a MVP 工作量 ~400 行</strong>,建议<strong>和 Step 1 同时上线</strong>。</p>
         </div>
       </div>
     </details>
