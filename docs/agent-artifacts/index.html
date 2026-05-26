@@ -1,0 +1,568 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multica - Agent 产物 (Artifact) 方案</title>
+<link rel="stylesheet" href="../deep-dive/style.css" />
+<style>
+  .faq-list { display: flex; flex-direction: column; gap: 8px; }
+  .faq-item {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 0;
+    overflow: hidden;
+  }
+  .faq-item summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 12px 16px;
+    font-weight: 500;
+    font-size: 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    user-select: none;
+    color: var(--fg);
+  }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::before {
+    content: "▸";
+    color: var(--fg-subtle);
+    font-size: 11px;
+    margin-top: 4px;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+  .faq-item[open] > summary::before { transform: rotate(90deg); }
+  .faq-item summary:hover { background: var(--surface-2); }
+  .faq-item[open] > summary { border-bottom: 1px solid var(--border); }
+  .faq-item .faq-body { padding: 14px 16px 18px 32px; color: var(--fg); }
+  .faq-item .faq-body p:last-child { margin-bottom: 0; }
+  .faq-item .faq-body table { margin: 8px 0 12px; font-size: 13px; }
+  .ascii { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; white-space: pre; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="breadcrumb">
+    <a href="../overview.html">Multica 文档</a> / <span>Agent 产物 (Artifact) 方案</span>
+  </div>
+
+  <div class="title-block">
+    <h1>Agent 产物 (Artifact) 方案</h1>
+    <p class="path">docs/agent-artifacts/index.html</p>
+    <p class="lede">本文档拆解"agent 跑完一次到底产出了什么",分析现状痛点,并给出
+      <code>agent_artifact</code> 表 + daemon 提取器 + 评论回流 + prompt 注入 + UI 清单的完整 4 步方案。
+      每一步独立可上线、纯加法、零回归。</p>
+  </div>
+
+  <div class="faq-list">
+
+    <details class="faq-item" open>
+      <summary>一次 agent 运行实际产出几类东西?</summary>
+      <div class="faq-body">
+        <p>按<strong>产物地位</strong>从高到低排成 <strong>6 类</strong>:</p>
+        <table>
+          <thead>
+            <tr><th>#</th><th>类别</th><th>产物地位</th><th>落库位置</th><th>跨 agent 可复用</th><th>例子</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>①</td><td>代码 / 文件改动</td><td>★★★★★ 终极产物</td><td>git 仓库</td><td>✅ 全员可见</td><td><code>commit a1b2c3d</code></td></tr>
+            <tr><td>②</td><td>评论 / 状态变更</td><td>★★★★ 公共白板</td><td><code>comments</code> 表</td><td>✅ 强制注入 prompt</td><td>"已修复,原因 X"</td></tr>
+            <tr><td>③</td><td>过程遥测 task_message</td><td>★★ 实时观察</td><td><code>task_message</code> 表</td><td>❌ 不读不复用</td><td><code>tool_use(Edit, ...)</code></td></tr>
+            <tr><td>④</td><td>Agent 私有内存</td><td>★ 私有上下文</td><td>jsonl (不在 Multica)</td><td>❌ 仅同 agent 续聊</td><td><code>~/.claude/.../*.jsonl</code></td></tr>
+            <tr><td>⑤</td><td>用量代价</td><td>— (代价不是产物)</td><td><code>task_usage_*</code></td><td>—</td><td><code>cost=$0.18</code></td></tr>
+            <tr><td>⑥</td><td><strong>外部世界产物</strong></td><td><strong>★★★★★ 用户视角的真产物</strong></td><td><strong>第三方系统</strong></td><td><strong>❌ 看不见,只能从 task_message 推断</strong></td><td>飞书 URL、生成的 PNG</td></tr>
+          </tbody>
+        </table>
+        <div class="callout warn">
+          <p><strong>关键洞察:</strong> ⑥ 在 MCP 时代是主流形态(写飞书/Notion/Slack/Jira/调内部 API),
+          但当前 Multica 没把它当一等公民建模 — 它只活在 <code>task_message</code> 的
+          <code>tool/input/output</code> 三个字段里,无索引、有 8KB 截断(daemon 端 L2890)、不跨 agent、
+          未来若引入归档策略则会失联。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>飞书文档/生成图片/Slack 消息这些算产物吗?Multica 看得见吗?</summary>
+      <div class="faq-body">
+        <p><strong>算产物</strong> — 是和 ① 代码 diff 同等地位的"用户视角真产物",但和 ① 有 4 个关键差别:</p>
+        <ol>
+          <li><strong>看不见产物本身</strong>:Multica 只看见"做这件事的过程"
+            (<code>tool_use.input + tool_result.output</code>),真正的飞书文档在飞书服务器上,Multica 永远拉不到。</li>
+          <li><strong>不可信</strong>:① git commit 不可篡改,⑥ 飞书 URL 只是 agent 报告它创建过 —
+            可能撒谎、可能 24h 后被删。</li>
+          <li><strong>图片有特殊变种</strong>:
+            <ul>
+              <li><code>Write(file=docs/arch.png)</code> 写到工作区 → 归 ① (进 git)</li>
+              <li><code>mcp__image_gen</code> 调外部 API 生图 → 归 ⑥ (URL)</li>
+              <li><code>/tmp/foo.png</code> 临时文件 → 既不是①也不是⑥ (过程性产物,daemon 退出即丢)</li>
+            </ul>
+          </li>
+          <li><strong>判断标准</strong>:这个东西明天还在不在?在哪里?谁能访问?</li>
+        </ol>
+        <pre class="ascii">
+    Agent (Claude Code) 进程内
+    +-----------------------------------+
+    | tool_use:                         |
+    |   name=mcp__feishu__create_doc    |
+    |   input={title, content}          |
+    +-------------+---------------------+
+                  | MCP 协议
+                  v
+    +-----------------------------------+
+    |  飞书 MCP Server (本地或远程进程)  |  &lt;- Multica 看不到这里
+    |  调用飞书 OpenAPI                  |
+    +-------------+---------------------+
+                  | HTTPS
+                  v
+          +----------------+
+          |  飞书服务器     |  &lt;- 真正的产物存这里
+          |  (doc URL)     |
+          +-------+--------+
+                  | 返回 URL
+                  v
+    +-----------------------------------+
+    | tool_result:                      |
+    |   content="https://feishu.cn/..." |
+    +-------------+---------------------+
+                  | daemon 抓 stream-json
+                  v
+          task_message 表 (③ 实时观察) — 无索引,归档后失联
+        </pre>
+        <p>所以 ⑥ 想"持久 + 可追溯",必须借道 ② 评论 — 否则只剩 ③ 这条无索引通道。</p>
+        <div class="callout">
+          <p><strong>注</strong>:task_message 是<strong>入库</strong>的(handler/daemon.go L1842 <code>CreateTaskMessage</code>),
+          关浏览器不会丢数据(刷新会补齐)。但它无索引、不参与续聊、
+          未来若引入归档策略则产物链接失联 — 这才是需要新建 artifact 表的真正原因。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>现在用 SQL 能拿到产物吗?</summary>
+      <div class="faq-body">
+        <p>能,但很糙 — 因为线索散落在 <code>task_message.tool/input/output</code> 里,没有结构化字段。3 个档位:</p>
+
+        <p><strong>档位 A — 人肉看(已能用)</strong></p>
+        <p>打开 issue 详情页,AgentLiveCard 实时滚动,能看到:</p>
+        <pre><code>🔧 Tool: mcp__feishu__create_doc
+   Input: {"title":"Q3 报告", ...}
+   Output: {"doc_url":"https://feishu.cn/docs/abc123", ...}</code></pre>
+
+        <p><strong>档位 B — SQL 按 tool 过滤(已能用)</strong></p>
+        <pre><code>SELECT seq, tool, input, output
+FROM task_message
+WHERE task_id = '&lt;task-id&gt;'
+  AND type = 'tool_use'
+  AND tool LIKE 'mcp__%'
+ORDER BY seq;</code></pre>
+        <p>常见高价值 tool 名:</p>
+        <table>
+          <thead><tr><th>产出类型</th><th>tool name 模式</th><th>提取方法</th></tr></thead>
+          <tbody>
+            <tr><td>写代码到工作区</td><td><code>Write / Edit / MultiEdit</code></td><td><code>input.file_path</code></td></tr>
+            <tr><td>跑命令产生副作用</td><td><code>Bash</code></td><td>看 <code>input.command</code> 推断 (git push / gh pr create)</td></tr>
+            <tr><td>飞书/Notion/Slack 等 MCP</td><td><code>mcp__&lt;server&gt;__&lt;tool&gt;</code></td><td>tool name 前缀知道目标系统,URL 在 output 里</td></tr>
+            <tr><td>Web 抓取/搜索</td><td><code>WebFetch / WebSearch</code></td><td><code>input.url</code></td></tr>
+          </tbody>
+        </table>
+
+        <p><strong>档位 C — 可信引用(❌ 现在没有)</strong> — 需要新建 <code>agent_artifact</code> 表,见下方方案。</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>现状的 5 个具体痛点(P1-P5)</summary>
+      <div class="faq-body">
+        <table>
+          <thead><tr><th>#</th><th>痛点</th><th>后果</th></tr></thead>
+          <tbody>
+            <tr><td>P1</td><td><strong>没有索引</strong> — 飞书 URL 散在 <code>task_message.output</code> text 里</td><td>无法做"issue 维度的产物清单"</td></tr>
+            <tr><td>P2</td><td><strong>8KB 截断(daemon 端 L2890,server 端无截断)</strong> — <code>output = output[:8192]</code></td><td>长 URL/长 JSON 末尾被切,偶发性丢链接</td></tr>
+            <tr><td>P3</td><td><strong>不入续聊上下文</strong> — task_message 不参与 <code>buildIssuePrompt</code></td><td>换 agent 来 review 时看不到上轮飞书文档,跨 agent 协作断层</td></tr>
+            <tr><td>P4</td><td><strong>不入 ② 公共白板</strong> — 产物只活在 task_message,未来引入归档策略则失联</td><td>长期可追溯性 = 0</td></tr>
+            <tr><td>P5</td><td><strong>格式不统一</strong> — 飞书是 JSON、DALL-E 是 URL、Bash 是文本</td><td>没法写通用展示组件</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="faq-item" open>
+      <summary>解决方案总览(4 步,每步独立可上线)</summary>
+      <div class="faq-body">
+        <pre class="ascii">
+Step 1: 表结构 + 提取器(最小闭环)        &lt;- MVP,纯加法,零回归
+   |
+   v
+Step 2: 回流到 issue 评论(② 公共白板)    &lt;- 让用户/agent 都能看到
+   |
+   v
+Step 3: 注入 prompt(跨 agent 接力)       &lt;- 让下一个 agent 自动读到上一轮产物
+   |
+   v
+Step 4: 前端"产物清单"组件               &lt;- issue 详情页可视化
+        </pre>
+        <p><strong>设计原则(4 条铁律):</strong></p>
+        <ol>
+          <li><strong>保持 task_message 不变</strong> — 它是"过程录像",不要再叠功能。</li>
+          <li><strong>新建 <code>agent_artifact</code> 表</strong> — 让产物变成一等公民,和 task_message 解耦。</li>
+          <li><strong>提取在 daemon 端做</strong> — 避免 server 反向解析 task_message。</li>
+          <li><strong>回流 ② 评论 + 注入 prompt</strong> — 跨 agent 可见、长期可追溯。在 <a href="../faq/index.html#cross-agent">FAQ: 换 agent 上下文</a> 提案落地前,评论是唯一的跨 agent 通道;本方案落地后产物清单也成为通道之一,但仍<strong>借道评论</strong>走。</li>
+        </ol>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1 — 表结构 agent_artifact</summary>
+      <div class="faq-body">
+        <p>新建 migration(编号请核对最新,写本文档时为 107,落地前请重新核对避免撞车):</p>
+        <pre><code>CREATE TABLE agent_artifact (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id    UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    issue_id        UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
+    task_id         UUID NOT NULL REFERENCES agent_task_queue(id) ON DELETE CASCADE,
+    agent_id        UUID REFERENCES agent(id) ON DELETE SET NULL,
+
+    kind            TEXT NOT NULL,
+        -- 'file'    : 工作区内文件 (Write/Edit)
+        -- 'url'     : 外部 URL (飞书/Notion/PR 链接)
+        -- 'commit'  : git 提交 (hash)
+        -- 'image'   : 图片 (URL 或 file,二级标记)
+        -- 'message' : 外部消息 (Slack 消息 ID)
+        -- 'unknown' : 兜底
+    label           TEXT,                -- 人类可读名
+    location        TEXT NOT NULL,       -- URL / file path / git hash
+    mime_type       TEXT,
+    metadata        JSONB,               -- 任意补充
+
+    source_tool     TEXT NOT NULL,       -- 原始 tool name
+    source_seq      INT,                 -- 对应 task_message.seq
+    source_msg_id   UUID REFERENCES task_message(id) ON DELETE SET NULL,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE (task_id, source_tool, location)
+);
+
+CREATE INDEX idx_artifact_issue ON agent_artifact (issue_id, created_at DESC);
+CREATE INDEX idx_artifact_task ON agent_artifact (task_id);
+CREATE INDEX idx_artifact_kind ON agent_artifact (workspace_id, kind, created_at DESC);</code></pre>
+        <div class="callout">
+          <p><strong>设计要点:</strong></p>
+          <ul>
+            <li>主键关联到 <code>task_id + issue_id + workspace_id</code> 三层,任意层级可聚合查询</li>
+            <li><code>metadata</code> 用 jsonb,接新 MCP 不改 schema</li>
+            <li><code>UNIQUE (task_id, source_tool, location)</code> 幂等:同 task 内不重复,跨 task 保留两条(两次独立产出)</li>
+            <li>不挂在 task_message 上 — task_message 未来若归档不影响 artifact</li>
+            <li><code>kind</code> 用 string 不用枚举 — 接新 MCP 时随时加新 kind,不改 schema</li>
+          </ul>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1 — sqlc queries (artifact.sql)</summary>
+      <div class="faq-body">
+        <pre><code>-- name: CreateArtifact :one
+INSERT INTO agent_artifact (
+    workspace_id, issue_id, task_id, agent_id,
+    kind, label, location, mime_type, metadata,
+    source_tool, source_seq, source_msg_id
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+ON CONFLICT (task_id, source_tool, location) DO NOTHING
+RETURNING *;
+
+-- name: ListArtifactsByIssue :many
+SELECT * FROM agent_artifact
+WHERE issue_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: ListArtifactsByTask :many
+SELECT * FROM agent_artifact
+WHERE task_id = $1
+ORDER BY created_at;
+
+-- name: ListRecentArtifactsForPromptInjection :many
+SELECT kind, label, location, source_tool, created_at
+FROM agent_artifact
+WHERE issue_id = $1
+  AND kind &lt;&gt; 'file'
+ORDER BY created_at DESC
+LIMIT $2;</code></pre>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1 — daemon 端提取器(artifact_extractor.go)</summary>
+      <div class="faq-body">
+        <p>核心是中央分发器 + 按 tool name 路由:</p>
+        <pre><code>type ArtifactCandidate struct {
+    Kind       string         `json:"kind"`
+    Label      string         `json:"label,omitempty"`
+    Location   string         `json:"location"`
+    MimeType   string         `json:"mime_type,omitempty"`
+    Metadata   map[string]any `json:"metadata,omitempty"`
+    SourceTool string         `json:"source_tool"`
+    SourceSeq  int            `json:"source_seq"`
+}
+
+var urlRegex = regexp.MustCompile(`https?://[^\s"'&lt;&gt;)\]]+`)
+
+func extractArtifacts(p toolPair) []ArtifactCandidate {
+    if ext, ok := toolExtractors[p.Tool]; ok {
+        return ext(p)
+    }
+    if strings.HasPrefix(p.Tool, "mcp__") {
+        return extractFromMCP(p)
+    }
+    return nil
+}
+
+var toolExtractors = map[string]func(toolPair) []ArtifactCandidate{
+    "Write":        extractFromFileWrite,
+    "Edit":         extractFromFileEdit,
+    "MultiEdit":    extractFromFileEdit,
+    "NotebookEdit": extractFromFileEdit,
+    "Bash":         extractFromBash,
+    "WebFetch":     extractFromWebFetch,
+}</code></pre>
+        <p><strong>4 个具体提取器:</strong></p>
+        <ul>
+          <li><code>extractFromFileWrite</code>: 读 <code>input.file_path</code>, kind=file</li>
+          <li><code>extractFromBash</code>: 白名单 <code>git push/gh pr</code>, regex 抠 commit hash / PR URL(避免噪音)</li>
+          <li><code>extractFromWebFetch</code>: 读 <code>input.url</code></li>
+          <li><code>extractFromMCP</code>: 通配 <code>mcp__</code> 前缀, 扫 output 里 URL, 图片后缀升级 image kind</li>
+        </ul>
+        <div class="callout warn">
+          <p><strong>关键点 1</strong>:提取器吃<strong>未截断的原始 <code>msg.Output</code></strong> — 在 daemon.go L2890 截断<strong>之前</strong>取一份
+            <code>rawOutput := msg.Output</code> 给提取器用,再让原有 8KB 截断和 batch append 走原路径。
+            这样既不破坏 task_message 现有行为,又解决 P2。</p>
+          <p><strong>关键点 2</strong>:<code>mcp__</code> 双下划线前缀是 Claude Code 专有命名。
+            Codex / Cursor / Copilot 的 MCP tool 命名规范可能不同 — <code>extractFromMCP</code> 的判断条件需要按 backend 拆,
+            这属于 Step 1 落地时的"中风险"项。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1 — 在 daemon.go 哪里插入提取调用</summary>
+      <div class="faq-body">
+        <p>修改 <code>daemon.go</code> 的 <code>case agent.MessageToolResult:</code> 分支(L2873,
+          truncation 在 L2890),伪代码:</p>
+        <pre><code>case agent.MessageToolResult:
+    // ... 维护 inFlightTools (现有逻辑) ...
+
+    s := seq.Add(1)
+    rawOutput := msg.Output  // ★ 截断前保留原文
+
+    output := msg.Output
+    if len(output) > 8192 {
+        output = output[:8192]    // 给 task_message 用(不变)
+    }
+
+    // ... 现有逻辑:callIDToTool 查找、batch append TaskMessageData ...
+
+    // 新增:提取产物(用 rawOutput)
+    mu.Lock()
+    inputForArtifact := callIDToInput[msg.CallID]  // ★ 需在 tool_use 分支记录
+    mu.Unlock()
+
+    if candidates := extractArtifacts(toolPair{
+        Tool:   toolName,
+        Input:  inputForArtifact,
+        Output: rawOutput,     // 未截断
+        Seq:    int(s),
+    }); len(candidates) > 0 {
+        mu.Lock()
+        artifactBatch = append(artifactBatch, candidates...)
+        mu.Unlock()
+    }</code></pre>
+        <div class="callout">
+          <p><strong>额外改动</strong>:在 <code>case agent.MessageToolUse:</code> (L2855) 需同时记录
+            <code>callIDToInput[msg.CallID] = msg.Input</code> — 因为 tool_use 和 tool_result 分开两条消息,
+            提取时要把 input 和 output 配对。注意 pending text/thinking 的 flush 顺序不变,
+            保证 seq 先于 tool_result 入 batch。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 1 — 攒批上报(沿用 task_message 模式)</summary>
+      <div class="faq-body">
+        <p>在 daemon.go L2767 的 <code>flush()</code> 函数里,和 task_message 共享 500ms tick:</p>
+        <pre><code>flush := func() {
+    // 现有:flush task_message
+    if len(toSend) > 0 {
+        d.client.ReportTaskMessages(sendCtx, taskID, toSend)
+    }
+    // 新增:flush artifacts (同 5s 超时、同 best-effort 语义)
+    if len(artifactsToSend) > 0 {
+        d.client.ReportArtifacts(sendCtx, taskID, artifactsToSend)
+    }
+}</code></pre>
+        <p>对应新增:</p>
+        <ul>
+          <li><code>client.go</code>: <code>ReportArtifacts</code>(POST <code>/api/daemon/tasks/{taskId}/artifacts</code>)</li>
+          <li><code>handler/daemon.go</code>: <code>ReportArtifacts</code> handler(DaemonAuth + <code>requireDaemonTaskAccess</code>)</li>
+        </ul>
+        <p><strong>Step 1 走完 → P1 (无索引) + P2 (截断) 解决。</strong></p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 2 — 自动回流到 issue 评论(解决 P3 + P4)</summary>
+      <div class="faq-body">
+        <p>任务完成时,server 端 <code>CompleteTask</code> 写评论前查一次
+          <code>ListArtifactsByTask</code>,把清单拼进评论 body:</p>
+        <pre><code>**这次任务的产物:**
+- 📄 [Q3 飞书报告](https://feishu.cn/docs/abc123) (飞书)
+- 🖼️ [生成图](https://oai.../foo.png) (图片)
+- 📄 `src/auth.go` (文件)
+- 🔗 [PR #42](https://github.com/.../pull/42) (GitHub)</code></pre>
+        <p><strong>效果</strong>:产物从 ⑥ 升级到 ② (公共白板),未来归档 task_message 也不丢、跨 agent 必读 —
+          因为 <code>buildIssuePrompt</code> 本来就强制注入 comments。</p>
+        <div class="callout">
+          <p><strong>幂等策略</strong>:仅在 server 端自动合成评论那条路径(agent 的 <code>result.output</code> 兜底)里追加产物清单;
+            如果 agent 已主动发了包含相关 URL 的评论,则不重复贴。
+            判断方法:查 comments 表最近一条是否已包含 artifact location,有则跳过。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 3 — 注入到下一个 agent 的 prompt</summary>
+      <div class="faq-body">
+        <p>改造 <code>prompt.go</code> 的 <code>buildIssuePrompt</code>:</p>
+        <pre><code>artifacts, _ := queries.ListRecentArtifactsForPromptInjection(ctx, issueID, 20)
+
+if len(artifacts) > 0 {
+    sb.WriteString("\n## Previous artifacts (from earlier agent runs)\n")
+    sb.WriteString("Reference by URL/path; do not regenerate:\n\n")
+    for _, a := range artifacts {
+        fmt.Fprintf(&amp;sb, "- [%s] %s - %s\n", a.Kind, a.Label, a.Location)
+    }
+}</code></pre>
+        <p><strong>效果</strong>:换 agent 接手时自动看到上轮飞书文档、图片、PR 链接。
+          需注意 token 消耗,必要时按 kind 过滤或截断到 N 条。</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Step 4 — 前端"产物清单"组件</summary>
+      <div class="faq-body">
+        <p><strong>后端</strong>: <code>GET /api/issues/{id}/artifacts</code>,按 kind 分组返回。</p>
+        <p><strong>前端</strong>: <code>packages/views/issues/components/IssueArtifacts.tsx</code>,
+          挂在 issue 详情页右侧栏:</p>
+        <pre class="ascii">
+🔗 链接 (3)
+   - Q3 飞书报告
+   - Notion 设计稿
+   - GitHub PR #42
+
+🖼️ 图片 (1)
+   - [缩略图]
+
+📄 文件 (5)
+   - src/auth.go
+   - ...
+
+📦 提交 (2)
+   - a1b2c3d
+   - e4f5g6h
+        </pre>
+        <p>每条产物点击:</p>
+        <ul>
+          <li><code>kind=url/image</code> → 新窗口打开</li>
+          <li><code>kind=file</code> → 跳到工作区文件视图</li>
+          <li><code>kind=commit</code> → 跳到 git diff 视图</li>
+          <li>旁边的过程图标 → 跳到 <code>task_message.seq</code> 对应录像帧</li>
+        </ul>
+        <p><strong>P5 解决</strong>:统一的 kind 字段让前端写通用渲染逻辑。</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>落地节奏 / 风险评估</summary>
+      <div class="faq-body">
+        <table>
+          <thead>
+            <tr><th>阶段</th><th>范围</th><th>价值</th><th>风险</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>MVP (Step 1)</strong></td><td>表 + 提取器 + 上报</td><td>SQL 已能查任意 issue 产物,不动现有逻辑</td><td>低 (纯加法)</td></tr>
+            <tr><td>闭环 (+Step 2)</td><td>评论拼接</td><td>产物长期可追溯</td><td>低 (注意幂等:agent 已评论时不重复贴)</td></tr>
+            <tr><td>跨 agent (+Step 3)</td><td>prompt 注入</td><td>多 agent 协作打通</td><td>中 (prompt 长度/token 消耗需观察)</td></tr>
+            <tr><td>可视化 (+Step 4)</td><td>UI</td><td>用户体验提升</td><td>低 (独立组件)</td></tr>
+          </tbody>
+        </table>
+        <div class="callout warn">
+          <p><strong>Step 1 中风险项:</strong><code>mcp__</code> 前缀是 Claude Code 专有。
+            Codex / Cursor / Copilot 等 backend 的 MCP tool 命名规范不一定相同
+            (详见 <a href="../faq/index.html#agent-protocol">FAQ: Agent 集成层</a>)。
+            落地时 <code>extractFromMCP</code> 的前缀判断需按 backend 拆分或查实际命名。</p>
+        </div>
+        <div class="callout">
+          <p><strong>MVP 工作量:</strong></p>
+          <ul>
+            <li>1 个 migration</li>
+            <li>1 个 sqlc query 文件</li>
+            <li>1 个 daemon 提取器 (~150 行)</li>
+            <li>1 个 server handler</li>
+            <li><code>daemon.go</code> 在 L2855/L2873/L2767 三处插桩</li>
+          </ul>
+          <p>即可让"产物"成为系统的一等公民,无回归风险。</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>几个反直觉的设计决策(值得 review)</summary>
+      <div class="faq-body">
+        <ol>
+          <li><strong>为什么不在 server 端解析 task_message 来生成 artifact?</strong>
+            <br>跨节点、需要事务、性能差;daemon 端解析就近、便宜、不影响 server。</li>
+          <li><strong>为什么 <code>kind</code> 用 string 而不是枚举?</strong>
+            <br>接新 MCP 时随时加新 kind,不改 schema。</li>
+          <li><strong><code>UNIQUE (task_id, source_tool, location)</code> 会不会太严?</strong>
+            <br>不会。同 task 同 tool 写同一 URL 是"幂等同事件";
+            <strong>跨 task</strong> 同 issue 写同一 URL <strong>应该</strong>保留两条 — 那是两次独立产出。</li>
+          <li><strong>要不要把 Bash 的 stdout 全部 URL 提取?</strong>
+            <br>不要。Bash 噪音大,必须靠 <code>command</code> 白名单 (<code>git push</code> / <code>gh pr</code>),否则污染产物表。</li>
+          <li><strong>外部产物为什么必须借道评论(Step 2)?</strong>
+            <br><code>buildIssuePrompt</code> 强制注入 comments — 这是跨 agent 唯一保底通道。
+            单纯写 artifact 表只解决"能查",没解决"下一个 agent 必读"。</li>
+        </ol>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>一句话总结</summary>
+      <div class="faq-body">
+        <div class="callout">
+          <p><strong>现状</strong>:6 类产物中,⑥ (外部副作用) 只活在 <code>task_message</code> 的
+            <code>tool/input/output</code> 三个字段里 — 无索引、有 8KB 截断(daemon 端)、不跨 agent、未来若归档则失联。</p>
+          <p><strong>方案</strong>:<code>agent_artifact</code> 表 + daemon 端 <code>extractArtifacts</code> 提取器
+            + 自动回流评论 + 注入下一轮 prompt + 前端清单组件 — <strong>4 步独立可上线,每一步纯加法、零回归</strong>。</p>
+          <p><strong>MVP (Step 1)</strong>:1 个 migration + 1 个 sqlc query + 1 个 提取器 + 1 个 handler,
+            即可让"产物"成为系统一等公民。</p>
+        </div>
+      </div>
+    </details>
+
+  </div>
+
+  <footer>
+    维护者: 产物方案相关问题请修改 <code>docs/agent-artifacts/index.html</code>。
+    对应代码插点: <code>daemon.go L2855/L2873/L2767</code> (提取 + 攒批),
+    <code>handler/daemon.go</code> (上报), <code>prompt.go</code> (注入)。
+  </footer>
+
+</div>
+</body>
+</html>
